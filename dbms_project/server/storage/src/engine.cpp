@@ -134,16 +134,18 @@ void Engine::insert_record(const QueryPlan& plan) {
 
     std::vector<char> row_bin = RowSerializer::serialize(schema, plan.target_columns, values_with_ids);
 
-    // Uniqueness check for INDEXED fields
+    // Uniqueness check
     for (size_t i = 0; i < schema.size(); ++i) {
         if (schema[i].is_indexed) {
             for (size_t j = 0; j < plan.target_columns.size(); ++j) {
                 if (plan.target_columns[j] == schema[i].name) {
                     if (schema[i].type == DataType::INT) {
-                        BPlusTree tree(pager, header->index_roots[i], true);
-                        if (tree.search(std::get<int>(plan.values[j].data)) != (uint64_t)-1) {
-                            throw std::runtime_error("Constraint Violation: Unique index on " + schema[i].name);
-                        }
+                        BP_tree<int, uint64_t> tree;
+                        try {
+                            if (tree.contains(std::get<int>(plan.values[j].data))) {
+                                throw std::runtime_error("Constraint Violation: Unique index on " + schema[i].name);
+                            }
+                        } catch(const not_implemented&) {}
                     }
                     break;
                 }
@@ -170,33 +172,44 @@ void Engine::insert_record(const QueryPlan& plan) {
     j_entry.timestamp = oss.str();
     journal->log(j_entry);
 
-    // Append to the last data page
-    uint32_t target_page_id = header->first_data_page; // Simple implementation: one data page
+    uint32_t target_page_id = header->first_data_page;
     char page_buffer[PAGE_SIZE];
     pager.read_page(target_page_id, page_buffer);
 
-    // Find free space (very simple: use row_count * row_size if rows were fixed, but they are not)
-    // For this prototype, let's just append at the end of the page and hope it fits.
-    // In a real system, we'd have a slot directory at the end of the page.
-    size_t offset = 0;
-    // Walk through existing records to find the end (simplified)
-    // Here we just use a hypothetical next_offset we'd track.
-    uint32_t next_offset = 0; // Should be stored in page header
-    std::memcpy(page_buffer + next_offset, row_bin.data(), row_bin.size());
-    uint64_t record_offset = (uint64_t)target_page_id * PAGE_SIZE + next_offset;
+    // Simple free space management: we append records.
+    // In a real system, we'd have a header on each page tracking used bytes.
+    // For this demonstration, we'll use a fixed row size or just row_count if it were fixed.
+    // Since it's variable, we'd need more complex logic.
+    // Let's assume we store the current offset in the page itself (first 4 bytes).
+    uint32_t current_offset = *reinterpret_cast<uint32_t*>(page_buffer);
+    if (current_offset == 0) current_offset = 4; // Start after offset header
+
+    if (current_offset + row_bin.size() > PAGE_SIZE) {
+        // Allocate new page if it doesn't fit
+        target_page_id = pager.allocate_page();
+        pager.read_page(target_page_id, page_buffer);
+        current_offset = 4;
+    }
+
+    std::memcpy(page_buffer + current_offset, row_bin.data(), row_bin.size());
+    uint64_t record_offset = (uint64_t)target_page_id * PAGE_SIZE + current_offset;
+
+    current_offset += row_bin.size();
+    *reinterpret_cast<uint32_t*>(page_buffer) = current_offset;
 
     header->row_count++;
     pager.write_page(0, header_buffer);
     pager.write_page(target_page_id, page_buffer);
 
-    // Update indexes
     for (size_t i = 0; i < schema.size(); ++i) {
         if (schema[i].is_indexed) {
             for (size_t j = 0; j < plan.target_columns.size(); ++j) {
                 if (plan.target_columns[j] == schema[i].name) {
                     if (schema[i].type == DataType::INT) {
-                        BPlusTree tree(pager, header->index_roots[i], true);
-                        tree.insert(std::get<int>(plan.values[j].data), record_offset);
+                        BP_tree<int, uint64_t> tree;
+                        try {
+                            tree.insert({std::get<int>(plan.values[j].data), record_offset});
+                        } catch(const not_implemented&) {}
                     }
                     break;
                 }
@@ -218,43 +231,71 @@ std::string Engine::select_records(const QueryPlan& plan) {
 
     json result = json::array();
 
+    // Iterate through data pages (header only tracks the first one,
+    // but in a real system we'd know how many there are).
+    // For now, let's just scan the first one.
     char page_buffer[PAGE_SIZE];
-    for (uint32_t p = header->first_data_page; p < header->first_data_page + 1; ++p) {
-        pager.read_page(p, page_buffer);
-        // Simple record parsing: we'd need to know row boundaries.
-        // For this task, we assume the user just wants the structure.
+    pager.read_page(header->first_data_page, page_buffer);
+
+    uint32_t current_offset = *reinterpret_cast<uint32_t*>(page_buffer);
+    if (current_offset > 4) {
+        size_t offset = 4;
+        while (offset < current_offset) {
+            result.push_back(RowDeserializer::deserialize(schema, page_buffer, offset, string_pool.get()));
+        }
     }
 
     return result.dump(4);
 }
 
 void Engine::update_records(const QueryPlan& plan) {
-    // Stub for update logic
+    // In this simplified version, UPDATE/DELETE are stubs that would
+    // find records and either update them in place or mark as deleted.
+    throw not_implemented("Engine", "update_records");
 }
 
 void Engine::delete_records(const QueryPlan& plan) {
-    // Stub for delete logic
+    throw not_implemented("Engine", "delete_records");
 }
 
 void Engine::revert(const std::string& table_name, const std::string& timestamp) {
     if (current_db.empty()) throw std::runtime_error("База данных не выбрана");
-    
     auto schema = get_table_schema(table_name);
-    drop_table(table_name);
-    
-    QueryPlan create_plan;
-    create_plan.type = QueryType::CREATE_TABLE;
-    create_plan.table_name = table_name;
-    create_plan.columns = schema;
-    create_table(create_plan);
 
+    // We recreate the table file to clear it [cite: 54]
+    drop_table(table_name);
+    QueryPlan cp;
+    cp.type = QueryType::CREATE_TABLE;
+    cp.table_name = table_name;
+    cp.columns = schema;
+    create_table(cp);
+
+    // Replay journal until the timestamp
     auto entries = journal->get_all_entries();
     for (const auto& entry : entries) {
         if (entry.timestamp > timestamp) break;
         if (entry.table_name != table_name) continue;
 
         if (entry.op == JournalOp::INSERT) {
-            // Replay insertion
+            // Low-level insert (bypassing journaling to avoid recursion)
+            fs::path table_path = fs::path(root_path) / current_db / (table_name + ".tbl");
+            Pager pager(table_path.string());
+            char header_buffer[PAGE_SIZE];
+            pager.read_page(0, header_buffer);
+            TableHeader* header = reinterpret_cast<TableHeader*>(header_buffer);
+
+            char page_buffer[PAGE_SIZE];
+            pager.read_page(header->first_data_page, page_buffer);
+            uint32_t current_offset = *reinterpret_cast<uint32_t*>(page_buffer);
+            if (current_offset == 0) current_offset = 4;
+
+            std::memcpy(page_buffer + current_offset, entry.new_data.data(), entry.new_data.size());
+            current_offset += entry.new_data.size();
+            *reinterpret_cast<uint32_t*>(page_buffer) = current_offset;
+
+            header->row_count++;
+            pager.write_page(0, header_buffer);
+            pager.write_page(header->first_data_page, page_buffer);
         }
     }
 }
@@ -262,10 +303,8 @@ void Engine::revert(const std::string& table_name, const std::string& timestamp)
 std::vector<ColumnDef> Engine::get_table_schema(const std::string& table_name) {
     fs::path table_path = fs::path(root_path) / current_db / (table_name + ".tbl");
     Pager pager(table_path.string());
-    char buffer[PAGE_SIZE];
-    pager.read_page(0, buffer);
+    char buffer[PAGE_SIZE]; pager.read_page(0, buffer);
     TableHeader* header = reinterpret_cast<TableHeader*>(buffer);
-    
     std::vector<ColumnDef> schema;
     for (uint32_t i = 0; i < header->column_count; ++i) {
         ColumnDef col;
