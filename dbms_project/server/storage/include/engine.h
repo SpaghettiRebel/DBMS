@@ -1,31 +1,42 @@
 #pragma once
 #include "../shared/QueryPlan.h"
 #include "file_manager.h"
-#include "bplus_tree.cpp" // Предположим реализацию здесь
+#include "bplus_tree.h"
+#include "string_pool.h"
+#include "journal.h"
+#include "table_metadata.h"
 #include <string>
 #include <map>
 #include <memory>
+#include <vector>
 
 class Engine {
 private:
-    std::string root_path; // Путь к "Уровню систем" [cite: 9]
-    std::string current_db; // Активная база данных [cite: 35]
+    std::string root_path;
+    std::string current_db;
+    std::unique_ptr<StringPool> string_pool;
+    std::unique_ptr<Journal> journal;
 
-    // Вспомогательные методы
     std::string get_table_path(const std::string& table_name);
-    void validate_insert(const std::string& table_name, const QueryPlan& plan);
+    std::vector<ColumnDef> get_table_schema(const std::string& table_name);
+    void update_table_header(const std::string& table_name, const TableHeader& header);
 
 public:
     explicit Engine(std::string root);
     
-    // Главный входной узел для выполнения команд
     void execute(const QueryPlan& plan);
 
-    // DDL операции [cite: 36]
     void create_database(const std::string& name);
-    void create_table(const QueryPlan& plan);
+    void drop_database(const std::string& name);
+    void use_database(const std::string& name);
 
-    // DML операции [cite: 39]
+    void create_table(const QueryPlan& plan);
+    void drop_table(const std::string& table_name);
+
     void insert_record(const QueryPlan& plan);
-    std::string select_records(const QueryPlan& plan); // Возвращает JSON строку [cite: 24]
+    std::string select_records(const QueryPlan& plan);
+    void update_records(const QueryPlan& plan);
+    void delete_records(const QueryPlan& plan);
+
+    void revert(const std::string& table_name, const std::string& timestamp);
 };
