@@ -26,5 +26,6 @@ struct TableHeader {
     uint32_t column_count;
     uint32_t row_count;       // Сколько всего записей в таблице
     uint32_t first_data_page; // Номер первой страницы с данными (обычно 1)
+    uint32_t index_roots[MAX_COLUMNS]; // Корневые страницы для индексов [cite: 20]
     ColumnMetadata columns[MAX_COLUMNS];
 };
