@@ -1,9 +1,9 @@
 #pragma once
-#include <cstdint>
-#include <fstream>
 #include <string>
-#include <unordered_map>
 #include <vector>
+#include <unordered_map>
+#include <fstream>
+#include <cstdint>
 
 class StringPool {
 private:

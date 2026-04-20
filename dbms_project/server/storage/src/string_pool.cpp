@@ -1,7 +1,6 @@
 #include "../include/string_pool.h"
-
-#include <cstring>
 #include <iostream>
+#include <cstring>
 
 StringPool::StringPool(const std::string& path) : pool_path(path) {
     file.open(pool_path, std::ios::in | std::ios::out | std::ios::binary);

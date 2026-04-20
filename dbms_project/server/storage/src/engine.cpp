@@ -1,15 +1,14 @@
 #include "../include/engine.h"
-
-#include <chrono>
-#include <filesystem>
-#include <iomanip>
-#include <iostream>
-#include <nlohmann/json.hpp>
-#include <regex>
-#include <sstream>
-#include <stdexcept>
-
 #include "../include/serializer.h"
+#include <filesystem>
+#include <iostream>
+#include <stdexcept>
+#include <nlohmann/json.hpp>
+#include <chrono>
+#include <iomanip>
+#include <sstream>
+#include <regex>
+#include <fstream>
 
 namespace fs = std::filesystem;
 using json = nlohmann::json;
@@ -27,35 +26,57 @@ public:
             if (!row.contains(node->left_column)) return false;
             auto val = row[node->left_column];
             if (node->op == OpType::EQ) {
-                if (std::holds_alternative<int>(node->right_value.data))
-                    return val == std::get<int>(node->right_value.data);
+                if (std::holds_alternative<int>(node->right_value.data)) return val == std::get<int>(node->right_value.data);
                 return val == std::get<std::string>(node->right_value.data);
             }
-            if (node->op == OpType::NEQ) {
-                if (std::holds_alternative<int>(node->right_value.data))
-                    return val != std::get<int>(node->right_value.data);
-                return val != std::get<std::string>(node->right_value.data);
-            }
             if (node->op == OpType::BETWEEN) {
-                int i_val = val.get<int>();
-                return i_val >= std::get<int>(node->right_value.data) &&
-                       i_val < std::get<int>(node->right_value_between->data);
+                if (std::holds_alternative<int>(node->right_value.data)) {
+                    int i_val = val.get<int>();
+                    return i_val >= std::get<int>(node->right_value.data) && i_val < std::get<int>(node->right_value_between->data);
+                }
+                std::string s_val = val.get<std::string>();
+                return s_val >= std::get<std::string>(node->right_value.data) && s_val < std::get<std::string>(node->right_value_between->data);
             }
             if (node->op == OpType::LIKE) {
                 std::string s_val = val.is_string() ? val.get<std::string>() : std::to_string(val.get<int>());
                 std::regex re(std::get<std::string>(node->right_value.data));
                 return std::regex_match(s_val, re);
             }
+            if (node->op == OpType::LESS) {
+                if (std::holds_alternative<int>(node->right_value.data)) return val < std::get<int>(node->right_value.data);
+                return val < std::get<std::string>(node->right_value.data);
+            }
             return true;
         } else {
-            if (node->logical_op == LogicalOpType::AND)
-                return evaluate(row, node->left_child.get()) && evaluate(row, node->right_child.get());
-            if (node->logical_op == LogicalOpType::OR)
-                return evaluate(row, node->left_child.get()) || evaluate(row, node->right_child.get());
+            if (node->logical_op == LogicalOpType::AND) return evaluate(row, node->left_child.get()) && evaluate(row, node->right_child.get());
+            if (node->logical_op == LogicalOpType::OR) return evaluate(row, node->left_child.get()) || evaluate(row, node->right_child.get());
         }
         return true;
     }
 };
+
+void save_metadata(const std::string& path, const TableHeader& header) {
+    std::ofstream ofs(path, std::ios::binary);
+    ofs.write(reinterpret_cast<const char*>(&header), sizeof(header));
+}
+
+TableHeader load_metadata(const std::string& path) {
+    TableHeader header;
+    std::ifstream ifs(path, std::ios::binary);
+    if (!ifs) throw std::runtime_error("Metadata not found: " + path);
+    ifs.read(reinterpret_cast<char*>(&header), sizeof(header));
+    return header;
+}
+
+std::string get_now_timestamp() {
+    auto now = std::chrono::system_clock::now();
+    auto t = std::chrono::system_clock::to_time_t(now);
+    auto ms = std::chrono::duration_cast<std::chrono::milliseconds>(now.time_since_epoch()) % 1000;
+    std::tm bt; localtime_r(&t, &bt);
+    std::ostringstream oss;
+    oss << std::put_time(&bt, "%Y.%m.%d-%H:%M:%S") << '.' << std::setfill('0') << std::setw(3) << ms.count();
+    return oss.str();
+}
 
 Engine::Engine(std::string root) : root_path(std::move(root)) {
     if (!fs::exists(root_path)) fs::create_directories(root_path);
@@ -70,28 +91,16 @@ void Engine::use_database(const std::string& name) {
 }
 
 void Engine::execute(const QueryPlan& plan) {
-    if (plan.type == QueryType::CREATE_DATABASE)
-        create_database(plan.database_name);
-    else if (plan.type == QueryType::DROP_DATABASE)
-        drop_database(plan.database_name);
-    else if (plan.type == QueryType::USE_DATABASE)
-        use_database(plan.database_name);
-    else if (plan.type == QueryType::CREATE_TABLE)
-        create_table(plan);
-    else if (plan.type == QueryType::DROP_TABLE)
-        drop_table(plan.table_name);
-    else if (plan.type == QueryType::INSERT)
-        insert_record(plan);
-    else if (plan.type == QueryType::SELECT)
-        std::cout << select_records(plan) << std::endl;
-    else if (plan.type == QueryType::REVERT)
-        revert(plan.table_name, plan.timestamp);
-    else if (plan.type == QueryType::UPDATE)
-        update_records(plan);
-    else if (plan.type == QueryType::DELETE)
-        delete_records(plan);
-    else
-        throw std::runtime_error("Операция еще не реализована");
+    if (plan.type == QueryType::CREATE_DATABASE) create_database(plan.database_name);
+    else if (plan.type == QueryType::DROP_DATABASE) drop_database(plan.database_name);
+    else if (plan.type == QueryType::USE_DATABASE) use_database(plan.database_name);
+    else if (plan.type == QueryType::CREATE_TABLE) create_table(plan);
+    else if (plan.type == QueryType::DROP_TABLE) drop_table(plan.table_name);
+    else if (plan.type == QueryType::INSERT) insert_record(plan);
+    else if (plan.type == QueryType::SELECT) std::cout << select_records(plan) << std::endl;
+    else if (plan.type == QueryType::REVERT) revert(plan.table_name, plan.timestamp);
+    else if (plan.type == QueryType::UPDATE) update_records(plan);
+    else if (plan.type == QueryType::DELETE) delete_records(plan);
 }
 
 void Engine::create_database(const std::string& name) {
@@ -104,160 +113,149 @@ void Engine::drop_database(const std::string& name) {
     fs::path db_path = fs::path(root_path) / name;
     if (!fs::exists(db_path)) throw std::runtime_error("No DB");
     fs::remove_all(db_path);
+    if (current_db == name) { current_db = ""; string_pool.reset(); journal.reset(); }
 }
 
 void Engine::create_table(const QueryPlan& plan) {
-    if (current_db.empty()) throw std::runtime_error("База данных не выбрана");
-    fs::path table_path = fs::path(root_path) / current_db / (plan.table_name + ".tbl");
-    Pager pager(table_path.string());
-    TableHeader header;
-    std::memset(&header, 0, sizeof(header));
-    header.magic_number = 0x44424D53;
-    header.column_count = static_cast<uint32_t>(plan.columns.size());
-    header.last_data_page = 1;
+    if (current_db.empty()) throw std::runtime_error("No active DB");
+    fs::path db_dir = fs::path(root_path) / current_db;
+    TableHeader h; std::memset(&h, 0, sizeof(h)); h.magic_number = 0x44424D53;
+    h.column_count = static_cast<uint32_t>(plan.columns.size());
     for (size_t i = 0; i < plan.columns.size(); ++i) {
-        const auto& col = plan.columns[i];
-        std::strncpy(header.columns[i].name, col.name.c_str(), MAX_NAME_LEN);
-        header.columns[i].type = (col.type == DataType::INT) ? 0 : 1;
-        header.columns[i].is_not_null = col.is_not_null;
-        header.columns[i].is_indexed = col.is_indexed;
+        std::strncpy(h.columns[i].name, plan.columns[i].name.c_str(), MAX_NAME_LEN);
+        h.columns[i].type = (plan.columns[i].type == DataType::INT ? 0 : 1);
+        h.columns[i].is_not_null = plan.columns[i].is_not_null;
+        h.columns[i].is_indexed = plan.columns[i].is_indexed;
     }
-    char buffer[PAGE_SIZE] = {0};
-    std::memcpy(buffer, &header, sizeof(header));
-    pager.write_page(0, buffer);
-    pager.allocate_page();
+    save_metadata((db_dir / (plan.table_name + ".meta")).string(), h);
+    Pager p((db_dir / (plan.table_name + ".tbl")).string()); p.allocate_page();
 }
 
 void Engine::drop_table(const std::string& table_name) {
-    if (current_db.empty()) throw std::runtime_error("База данных не выбрана");
-    fs::path table_path = fs::path(root_path) / current_db / (table_name + ".tbl");
-    fs::path idx_path = fs::path(root_path) / current_db / (table_name + ".idx");
-    if (fs::exists(table_path)) fs::remove(table_path);
-    if (fs::exists(idx_path)) fs::remove(idx_path);
+    if (current_db.empty()) throw std::runtime_error("No active DB");
+    fs::path db_dir = fs::path(root_path) / current_db;
+    fs::remove(db_dir / (table_name + ".tbl"));
+    fs::remove(db_dir / (table_name + ".meta"));
+    fs::remove(db_dir / (table_name + ".idx"));
 }
 
 void Engine::insert_record(const QueryPlan& plan) {
-    if (current_db.empty()) throw std::runtime_error("База данных не выбрана");
-    fs::path table_path = fs::path(root_path) / current_db / (plan.table_name + ".tbl");
-    fs::path idx_path = fs::path(root_path) / current_db / (plan.table_name + ".idx");
-    Pager pager(table_path.string());
-    Pager idx_pager(idx_path.string());
-    char header_buffer[PAGE_SIZE];
-    pager.read_page(0, header_buffer);
-    TableHeader* header = reinterpret_cast<TableHeader*>(header_buffer);
+    if (current_db.empty()) throw std::runtime_error("No active DB");
+    fs::path db_dir = fs::path(root_path) / current_db;
+    auto meta_path = (db_dir / (plan.table_name + ".meta")).string();
+    auto h = load_metadata(meta_path);
     auto schema = get_table_schema(plan.table_name);
-    auto values_with_ids = plan.values;
+    auto values = plan.values;
+
     for (size_t i = 0; i < plan.target_columns.size(); ++i) {
-        for (const auto& col_def : schema) {
-            if (col_def.name == plan.target_columns[i]) {
-                if (values_with_ids[i].is_null && (col_def.is_not_null || col_def.is_indexed))
-                    throw std::runtime_error("NOT NULL violation");
-                if (col_def.type == DataType::STRING && !values_with_ids[i].is_null) {
-                    values_with_ids[i].data =
-                        static_cast<int>(string_pool->intern(std::get<std::string>(values_with_ids[i].data)));
-                }
+        for (const auto& col : schema) {
+            if (col.name == plan.target_columns[i]) {
+                if (values[i].is_null && (col.is_not_null || col.is_indexed))
+                    throw std::runtime_error("Constraint violation: NULL in column " + col.name);
+                if (col.type == DataType::STRING && !values[i].is_null)
+                    values[i].data = (int)string_pool->intern(std::get<std::string>(values[i].data));
                 break;
             }
         }
     }
-    auto row_bin = RowSerializer::serialize(schema, plan.target_columns, values_with_ids);
-    for (size_t i = 0; i < schema.size(); ++i) {
-        if (schema[i].is_indexed) {
+
+    auto row_bin = RowSerializer::serialize(schema, plan.target_columns, values);
+    Pager tbl_p((db_dir / (plan.table_name + ".tbl")).string());
+    Pager idx_p((db_dir / (plan.table_name + ".idx")).string());
+
+    for (size_t i = 0; i < h.column_count; ++i) {
+        if (h.columns[i].is_indexed) {
             for (size_t j = 0; j < plan.target_columns.size(); ++j) {
-                if (plan.target_columns[j] == schema[i].name && schema[i].type == DataType::INT) {
-                    BP_tree<int, pos_t> tree(&idx_pager, header->index_roots[i]);
-                    if (tree.contains(std::get<int>(plan.values[j].data))) throw std::runtime_error("Unique violation");
+                if (plan.target_columns[j] == h.columns[i].name) {
+                    if (h.columns[i].type == 0) {
+                        BP_tree<int, pos_t> tree(&idx_p, h.index_roots[i]);
+                        if (tree.contains(std::get<int>(plan.values[j].data))) throw std::runtime_error("Unique violation");
+                    } else {
+                        BP_tree<std::string, pos_t> tree(&idx_p, h.index_roots[i]);
+                        if (tree.contains(std::get<std::string>(plan.values[j].data))) throw std::runtime_error("Unique violation");
+                    }
                 }
             }
         }
     }
-    uint32_t target_p = header->last_data_page;
-    char page_buffer[PAGE_SIZE];
-    pager.read_page(target_p, page_buffer);
-    uint32_t offset = *reinterpret_cast<uint32_t*>(page_buffer);
-    if (offset == 0) offset = 4;
+
+    char page_buf[PAGE_SIZE]; tbl_p.read_page(h.last_data_page, page_buf);
+    uint32_t offset = *reinterpret_cast<uint32_t*>(page_buf); if (offset == 0) offset = 4;
     if (offset + sizeof(RecordHeader) + row_bin.size() > PAGE_SIZE) {
-        target_p = pager.allocate_page();
-        header->last_data_page = target_p;
-        pager.read_page(target_p, page_buffer);
-        offset = 4;
+        h.last_data_page = tbl_p.allocate_page(); tbl_p.read_page(h.last_data_page, page_buf); offset = 4;
     }
-    RecordHeader rh = {false, static_cast<uint32_t>(row_bin.size())};
-    std::memcpy(page_buffer + offset, &rh, sizeof(rh));
-    std::memcpy(page_buffer + offset + sizeof(rh), row_bin.data(), row_bin.size());
-    pos_t record_pos = {target_p, offset};
-    offset += sizeof(rh) + row_bin.size();
-    *reinterpret_cast<uint32_t*>(page_buffer) = offset;
-    header->row_count++;
-    for (size_t i = 0; i < schema.size(); ++i) {
-        if (schema[i].is_indexed) {
+    RecordHeader rh = {false, (uint32_t)row_bin.size()};
+    std::memcpy(page_buf + offset, &rh, sizeof(rh));
+    std::memcpy(page_buf + offset + sizeof(rh), row_bin.data(), row_bin.size());
+    pos_t record_pos = {h.last_data_page, offset};
+    *reinterpret_cast<uint32_t*>(page_buf) = offset + sizeof(rh) + (uint32_t)row_bin.size();
+    tbl_p.write_page(h.last_data_page, page_buf);
+
+    for (size_t i = 0; i < h.column_count; ++i) {
+        if (h.columns[i].is_indexed) {
             for (size_t j = 0; j < plan.target_columns.size(); ++j) {
-                if (plan.target_columns[j] == schema[i].name && schema[i].type == DataType::INT) {
-                    BP_tree<int, pos_t> tree(&idx_pager, header->index_roots[i]);
-                    tree.insert({std::get<int>(plan.values[j].data), record_pos});
-                    header->index_roots[i] = tree.get_root_id();
+                if (plan.target_columns[j] == h.columns[i].name) {
+                    if (h.columns[i].type == 0) {
+                        BP_tree<int, pos_t> tree(&idx_p, h.index_roots[i]);
+                        tree.insert({std::get<int>(plan.values[j].data), record_pos});
+                        h.index_roots[i] = tree.get_root_id();
+                    } else {
+                        BP_tree<std::string, pos_t> tree(&idx_p, h.index_roots[i]);
+                        tree.insert({std::get<std::string>(plan.values[j].data), record_pos});
+                        h.index_roots[i] = tree.get_root_id();
+                    }
                 }
             }
         }
     }
-    pager.write_page(0, header_buffer);
-    pager.write_page(target_p, page_buffer);
-    JournalEntry je;
-    je.op = JournalOp::INSERT;
-    je.table_name = plan.table_name;
-    je.new_data = row_bin;
-    auto now = std::chrono::system_clock::now();
-    auto timer = std::chrono::system_clock::to_time_t(now);
-    std::tm bt;
-    localtime_r(&timer, &bt);
-    std::ostringstream oss;
-    oss << std::put_time(&bt, "%Y.%m.%d-%H:%M:%S");
-    je.timestamp = oss.str();
+    h.row_count++; save_metadata(meta_path, h);
+    JournalEntry je = {JournalOp::INSERT, plan.table_name, get_now_timestamp(), record_pos, {}, row_bin};
     journal->log(je);
 }
 
 std::string Engine::select_records(const QueryPlan& plan) {
-    if (current_db.empty()) throw std::runtime_error("No DB");
-    auto table_path = fs::path(root_path) / current_db / (plan.table_name + ".tbl");
-    auto idx_path = fs::path(root_path) / current_db / (plan.table_name + ".idx");
-    Pager pager(table_path.string());
-    Pager idx_pager(idx_path.string());
-    char hb[PAGE_SIZE];
-    pager.read_page(0, hb);
-    TableHeader* h = reinterpret_cast<TableHeader*>(hb);
+    if (current_db.empty()) throw std::runtime_error("No active DB");
+    fs::path db_dir = fs::path(root_path) / current_db;
+    auto h = load_metadata((db_dir / (plan.table_name + ".meta")).string());
     auto schema = get_table_schema(plan.table_name);
+    Pager tbl_p((db_dir / (plan.table_name + ".tbl")).string());
+    Pager idx_p((db_dir / (plan.table_name + ".idx")).string());
     json res = json::array();
+
     if (plan.where_clause && plan.where_clause->is_leaf && plan.where_clause->op == OpType::EQ) {
-        for (size_t i = 0; i < schema.size(); ++i) {
-            if (schema[i].is_indexed && schema[i].name == plan.where_clause->left_column &&
-                schema[i].type == DataType::INT) {
-                BP_tree<int, pos_t> tree(&idx_pager, h->index_roots[i]);
-                pos_t pos = tree.find(std::get<int>(plan.where_clause->right_value.data));
+        for (size_t i = 0; i < h.column_count; ++i) {
+            if (h.columns[i].is_indexed && h.columns[i].name == plan.where_clause->left_column) {
+                pos_t pos = pos_t::invalid();
+                if (h.columns[i].type == 0) {
+                    BP_tree<int, pos_t> tree(&idx_p, h.index_roots[i]);
+                    auto it = tree.find(std::get<int>(plan.where_clause->right_value.data));
+                    if (it != tree.end()) pos = it->second;
+                } else {
+                    BP_tree<std::string, pos_t> tree(&idx_p, h.index_roots[i]);
+                    auto it = tree.find(std::get<std::string>(plan.where_clause->right_value.data));
+                    if (it != tree.end()) pos = it->second;
+                }
                 if (pos.is_valid()) {
-                    char pb[PAGE_SIZE];
-                    pager.read_page(pos.page_id, pb);
-                    RecordHeader* rh = reinterpret_cast<RecordHeader*>(pb + pos.offset);
+                    char buf[PAGE_SIZE]; tbl_p.read_page(pos.page_id, buf);
+                    RecordHeader* rh = (RecordHeader*)(buf + pos.offset);
                     if (!rh->is_deleted) {
-                        size_t doff = pos.offset + sizeof(RecordHeader);
-                        res.push_back(RowDeserializer::deserialize(schema, pb, doff, string_pool.get()));
+                        size_t d_off = pos.offset + sizeof(RecordHeader);
+                        res.push_back(RowDeserializer::deserialize(schema, buf, d_off, string_pool.get()));
                     }
                 }
                 return res.dump(4);
             }
         }
     }
-    for (uint32_t p = 1; p <= h->last_data_page; ++p) {
-        char pb[PAGE_SIZE];
-        pager.read_page(p, pb);
-        uint32_t coff = *reinterpret_cast<uint32_t*>(pb);
-        if (coff <= 4) continue;
+
+    for (uint32_t i = 0; i <= h.last_data_page; ++i) {
+        char buf[PAGE_SIZE]; tbl_p.read_page(i, buf);
+        uint32_t end_off = *reinterpret_cast<uint32_t*>(buf); if (end_off <= 4) continue;
         size_t off = 4;
-        while (off < coff) {
-            RecordHeader* rh = reinterpret_cast<RecordHeader*>(pb + off);
-            size_t doff = off + sizeof(RecordHeader);
+        while (off < end_off) {
+            RecordHeader* rh = (RecordHeader*)(buf + off); size_t data_off = off + sizeof(RecordHeader);
             if (!rh->is_deleted) {
-                size_t t_off = doff;
-                auto row = RowDeserializer::deserialize(schema, pb, t_off, string_pool.get());
+                size_t t_off = data_off; auto row = RowDeserializer::deserialize(schema, buf, t_off, string_pool.get());
                 if (ConditionEvaluator::evaluate(row, plan.where_clause.get())) res.push_back(row);
             }
             off += sizeof(RecordHeader) + rh->record_size;
@@ -267,42 +265,44 @@ std::string Engine::select_records(const QueryPlan& plan) {
 }
 
 void Engine::delete_records(const QueryPlan& plan) {
-    if (current_db.empty()) throw std::runtime_error("No DB");
-    auto table_path = fs::path(root_path) / current_db / (plan.table_name + ".tbl");
-    Pager pager(table_path.string());
-    char hb[PAGE_SIZE];
-    pager.read_page(0, hb);
-    TableHeader* h = reinterpret_cast<TableHeader*>(hb);
+    if (current_db.empty()) throw std::runtime_error("No active DB");
+    fs::path db_dir = fs::path(root_path) / current_db;
+    auto h = load_metadata((db_dir / (plan.table_name + ".meta")).string());
     auto schema = get_table_schema(plan.table_name);
-    for (uint32_t p = 1; p <= h->last_data_page; ++p) {
-        char pb[PAGE_SIZE];
-        pager.read_page(p, pb);
-        uint32_t coff = *reinterpret_cast<uint32_t*>(pb);
-        if (coff <= 4) continue;
-        bool changed = false;
-        size_t off = 4;
-        while (off < coff) {
-            RecordHeader* rh = reinterpret_cast<RecordHeader*>(pb + off);
-            size_t doff = off + sizeof(RecordHeader);
+    Pager tbl_p((db_dir / (plan.table_name + ".tbl")).string());
+    Pager idx_p((db_dir / (plan.table_name + ".idx")).string());
+
+    for (uint32_t i = 0; i <= h.last_data_page; ++i) {
+        char buf[PAGE_SIZE]; tbl_p.read_page(i, buf);
+        uint32_t end_off = *reinterpret_cast<uint32_t*>(buf); if (end_off <= 4) continue;
+        bool changed = false; size_t off = 4;
+        while (off < end_off) {
+            RecordHeader* rh = (RecordHeader*)(buf + off); size_t data_off = off + sizeof(RecordHeader);
             if (!rh->is_deleted) {
-                size_t t_off = doff;
-                auto row = RowDeserializer::deserialize(schema, pb, t_off, string_pool.get());
+                size_t t_off = data_off; auto row = RowDeserializer::deserialize(schema, buf, t_off, string_pool.get());
                 if (ConditionEvaluator::evaluate(row, plan.where_clause.get())) {
-                    rh->is_deleted = true;
-                    changed = true;
-                    h->row_count--;
-                    JournalEntry je;
-                    je.op = JournalOp::DELETE;
-                    je.table_name = plan.table_name;
-                    je.old_data.assign(pb + doff, pb + doff + rh->record_size);
+                    rh->is_deleted = true; changed = true; h.row_count--;
+                    for (size_t c = 0; c < h.column_count; ++c) {
+                        if (h.columns[c].is_indexed) {
+                            if (h.columns[c].type == 0) {
+                                BP_tree<int, pos_t> tree(&idx_p, h.index_roots[c]);
+                                tree.erase(row[h.columns[c].name].get<int>());
+                            } else {
+                                BP_tree<std::string, pos_t> tree(&idx_p, h.index_roots[c]);
+                                tree.erase(row[h.columns[c].name].get<std::string>());
+                            }
+                        }
+                    }
+                    std::vector<char> old_data(buf + data_off, buf + data_off + rh->record_size);
+                    JournalEntry je = {JournalOp::DELETE, plan.table_name, get_now_timestamp(), {i, (uint32_t)off}, old_data, {}};
                     journal->log(je);
                 }
             }
             off += sizeof(RecordHeader) + rh->record_size;
         }
-        if (changed) pager.write_page(p, pb);
+        if (changed) tbl_p.write_page(i, buf);
     }
-    pager.write_page(0, hb);
+    save_metadata((db_dir / (plan.table_name + ".meta")).string(), h);
 }
 
 void Engine::update_records(const QueryPlan& plan) {
@@ -311,62 +311,41 @@ void Engine::update_records(const QueryPlan& plan) {
 }
 
 void Engine::revert(const std::string& table_name, const std::string& timestamp) {
-    if (current_db.empty()) throw std::runtime_error("No DB");
-    auto schema = get_table_schema(table_name);
-    drop_table(table_name);
-    QueryPlan cp;
-    cp.type = QueryType::CREATE_TABLE;
-    cp.table_name = table_name;
-    cp.columns = schema;
-    create_table(cp);
+    if (current_db.empty()) throw std::runtime_error("No active DB");
     auto entries = journal->get_all_entries();
-    for (const auto& entry : entries) {
-        if (entry.timestamp > timestamp) break;
-        if (entry.table_name != table_name) continue;
-        if (entry.op == JournalOp::INSERT) {
-            auto table_path = fs::path(root_path) / current_db / (table_name + ".tbl");
-            Pager pager(table_path.string());
-            char hb[PAGE_SIZE];
-            pager.read_page(0, hb);
-            TableHeader* h = reinterpret_cast<TableHeader*>(hb);
-            char pb[PAGE_SIZE];
-            pager.read_page(h->last_data_page, pb);
-            uint32_t off = *reinterpret_cast<uint32_t*>(pb);
-            if (off == 0) off = 4;
-            if (off + sizeof(RecordHeader) + entry.new_data.size() > PAGE_SIZE) {
-                uint32_t new_p = pager.allocate_page();
-                h->last_data_page = new_p;
-                pager.read_page(new_p, pb);
-                off = 4;
-            }
-            RecordHeader rh = {false, static_cast<uint32_t>(entry.new_data.size())};
-            std::memcpy(pb + off, &rh, sizeof(rh));
-            std::memcpy(pb + off + sizeof(rh), entry.new_data.data(), entry.new_data.size());
-            off += sizeof(rh) + entry.new_data.size();
-            *reinterpret_cast<uint32_t*>(pb) = off;
-            h->row_count++;
-            pager.write_page(0, hb);
-            pager.write_page(h->last_data_page, pb);
+    Pager tbl_p((fs::path(root_path) / current_db / (table_name + ".tbl")).string());
+    auto h_path = (fs::path(root_path) / current_db / (table_name + ".meta")).string();
+    auto h = load_metadata(h_path);
+
+    for (int i = (int)entries.size() - 1; i >= 0; --i) {
+        const auto& e = entries[i];
+        if (e.timestamp <= timestamp) break;
+        if (e.table_name != table_name) continue;
+
+        char buf[PAGE_SIZE]; tbl_p.read_page(e.record_pos.page_id, buf);
+        RecordHeader* rh = (RecordHeader*)(buf + e.record_pos.offset);
+
+        if (e.op == JournalOp::INSERT) {
+            if (!rh->is_deleted) { rh->is_deleted = true; h.row_count--; }
+        } else if (e.op == JournalOp::DELETE) {
+            rh->is_deleted = false; h.row_count++;
+            std::memcpy(buf + e.record_pos.offset + sizeof(RecordHeader), e.old_data.data(), e.old_data.size());
+        } else if (e.op == JournalOp::UPDATE) {
+            std::memcpy(buf + e.record_pos.offset + sizeof(RecordHeader), e.old_data.data(), e.old_data.size());
+            rh->record_size = (uint32_t)e.old_data.size();
         }
+        tbl_p.write_page(e.record_pos.page_id, buf);
     }
+    save_metadata(h_path, h);
 }
 
 std::vector<ColumnDef> Engine::get_table_schema(const std::string& table_name) {
-    fs::path table_path = fs::path(root_path) / current_db / (table_name + ".tbl");
-
-    Pager pager(table_path.string());
-    char buffer[PAGE_SIZE];
-    pager.read_page(0, buffer);
-    TableHeader* header = reinterpret_cast<TableHeader*>(buffer);
-    std::vector<ColumnDef> schema;
-
-    for (uint32_t i = 0; i < header->column_count; ++i) {
-        ColumnDef col;
-        col.name = header->columns[i].name;
-        col.type = (header->columns[i].type == 0) ? DataType::INT : DataType::STRING;
-        col.is_not_null = header->columns[i].is_not_null;
-        col.is_indexed = header->columns[i].is_indexed;
-        schema.push_back(col);
+    auto h = load_metadata((fs::path(root_path) / current_db / (table_name + ".meta")).string());
+    std::vector<ColumnDef> s;
+    for (uint32_t i = 0; i < h.column_count; ++i) {
+        ColumnDef c; c.name = h.columns[i].name; c.type = (h.columns[i].type == 0 ? DataType::INT : DataType::STRING);
+        c.is_not_null = h.columns[i].is_not_null; c.is_indexed = h.columns[i].is_indexed;
+        s.push_back(c);
     }
-    return schema;
+    return s;
 }
