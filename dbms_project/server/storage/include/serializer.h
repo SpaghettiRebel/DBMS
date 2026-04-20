@@ -1,9 +1,10 @@
-#include <vector>
-#include <string>
 #include <cstring>
-#include <stdexcept>
-#include <variant>
 #include <nlohmann/json.hpp>
+#include <stdexcept>
+#include <string>
+#include <variant>
+#include <vector>
+
 #include "../shared/QueryPlan.h"
 #include "string_pool.h"
 
@@ -12,11 +13,10 @@ using json = nlohmann::json;
 class RowSerializer {
 public:
     // Сериализация: превращаем список значений в байты согласно схеме таблицы
-    static std::vector<char> serialize(const std::vector<ColumnDef>& schema, 
-                                       const std::vector<std::string>& target_columns,
-                                       const std::vector<Value>& values) {
+    static std::vector<char> serialize(const std::vector<ColumnDef>& schema,
+        const std::vector<std::string>& target_columns, const std::vector<Value>& values) {
         std::vector<char> buffer;
-        
+
         std::vector<Value> row_values(schema.size());
         for (size_t i = 0; i < schema.size(); ++i) {
             bool found = false;
@@ -51,8 +51,7 @@ public:
             if (schema[i].type == DataType::INT) {
                 int val = std::get<int>(row_values[i].data);
                 append_bytes(buffer, val);
-            } 
-            else if (schema[i].type == DataType::STRING) {
+            } else if (schema[i].type == DataType::STRING) {
                 // If it's a string, it might be already interned (stored as int/uint32_t)
                 if (std::holds_alternative<int>(row_values[i].data)) {
                     uint32_t id = static_cast<uint32_t>(std::get<int>(row_values[i].data));
@@ -70,7 +69,7 @@ public:
     }
 
 private:
-    template<typename T>
+    template <typename T>
     static void append_bytes(std::vector<char>& buffer, T value) {
         char bytes[sizeof(T)];
         std::memcpy(bytes, &value, sizeof(T));
@@ -80,7 +79,8 @@ private:
 
 class RowDeserializer {
 public:
-    static json deserialize(const std::vector<ColumnDef>& schema, const char* buffer, size_t& offset, StringPool* pool) {
+    static json deserialize(
+        const std::vector<ColumnDef>& schema, const char* buffer, size_t& offset, StringPool* pool) {
         json row;
         std::vector<bool> null_bitmap(schema.size());
         for (size_t i = 0; i < schema.size(); ++i) {
