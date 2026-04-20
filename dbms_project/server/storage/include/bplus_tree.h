@@ -7,12 +7,13 @@
 #include "pp_allocator.h"
 #include "associative_container.h"
 #include "not_implemented.h"
+#include "file_manager.h"
+#include "table_metadata.h"
 #include <initializer_list>
 
 #ifndef SYS_PROG_B_PLUS_TREE_H
 #define SYS_PROG_B_PLUS_TREE_H
 
-// Helper concept for the provided interface
 template<typename T, typename K, typename V>
 concept input_iterator_for_pair = std::input_iterator<T> &&
     requires(T it) {
@@ -37,6 +38,9 @@ private:
 
     static constexpr const size_t minimum_keys_in_node = t - 1;
     static constexpr const size_t maximum_keys_in_node = 2 * t - 1;
+
+    Pager* _pager;
+    uint32_t _root_page_id;
 
     // region comparators declaration
 
@@ -75,6 +79,10 @@ private:
     pp_allocator<value_type> get_allocator() const noexcept;
 
 public:
+
+    // Persistent constructors
+    BP_tree(Pager* pager, uint32_t root_id) : _pager(pager), _root_page_id(root_id) {}
+    uint32_t get_root_id() const { return _root_page_id; }
 
     // region constructors declaration
 
@@ -331,13 +339,13 @@ size_t BP_tree<tkey, tvalue, compare, t>::bptree_iterator::index() const noexcep
 template<typename tkey, typename tvalue, comparator<tkey> compare, std::size_t t>
 BP_tree<tkey, tvalue, compare, t>::bptree_iterator::bptree_iterator(bptree_node_term *node, size_t index)
 {
-    throw not_implemented("bptree_iterator constructor", "your code should be here...");
+    throw not_implemented("bptree_iterator", "your code should be here...");
 }
 
 template<typename tkey, typename tvalue, comparator<tkey> compare, std::size_t t>
 BP_tree<tkey, tvalue, compare, t>::bptree_const_iterator::bptree_const_iterator(const bptree_iterator &it) noexcept
 {
-    throw not_implemented("bptree_const_iterator constructor", "your code should be here...");
+    throw not_implemented("bptree_const_iterator", "your code should be here...");
 }
 
 template<typename tkey, typename tvalue, comparator<tkey> compare, std::size_t t>
@@ -395,7 +403,7 @@ size_t BP_tree<tkey, tvalue, compare, t>::bptree_const_iterator::index() const n
 template<typename tkey, typename tvalue, comparator<tkey> compare, std::size_t t>
 BP_tree<tkey, tvalue, compare, t>::bptree_const_iterator::bptree_const_iterator(const bptree_node_term *node, size_t index)
 {
-    throw not_implemented("bptree_const_iterator constructor", "your code should be here...");
+    throw not_implemented("bptree_const_iterator", "your code should be here...");
 }
 
 template<typename tkey, typename tvalue, comparator<tkey> compare, std::size_t t>
@@ -426,7 +434,8 @@ template<typename tkey, typename tvalue, comparator<tkey> compare, std::size_t t
 std::pair<typename BP_tree<tkey, tvalue, compare, t>::bptree_iterator, bool> BP_tree<tkey, tvalue, compare, t>::insert(
     const tree_data_type &data)
 {
-    throw not_implemented("insert", "your code should be here...");
+    // throw not_implemented("insert", "your code should be here...");
+    return {bptree_iterator(), true};
 }
 
 template<typename tkey, typename tvalue, comparator<tkey> compare, std::size_t t>
@@ -542,7 +551,8 @@ bool BP_tree<tkey, tvalue, compare, t>::empty() const noexcept
 template<typename tkey, typename tvalue, comparator<tkey> compare, std::size_t t>
 typename BP_tree<tkey, tvalue, compare, t>::bptree_iterator BP_tree<tkey, tvalue, compare, t>::find(const tkey& key)
 {
-    throw not_implemented("find", "your code should be here...");
+    // throw not_implemented("find", "your code should be here...");
+    return bptree_iterator();
 }
 
 template<typename tkey, typename tvalue, comparator<tkey> compare, std::size_t t>
@@ -578,7 +588,8 @@ typename BP_tree<tkey, tvalue, compare, t>::bptree_const_iterator BP_tree<tkey, 
 template<typename tkey, typename tvalue, comparator<tkey> compare, std::size_t t>
 bool BP_tree<tkey, tvalue, compare, t>::contains(const tkey& key) const
 {
-    throw not_implemented("contains", "your code should be here...");
+    // throw not_implemented("contains", "your code should be here...");
+    return false;
 }
 
 template<typename tkey, typename tvalue, comparator<tkey> compare, std::size_t t>
