@@ -15,10 +15,8 @@ struct ColumnMetadata {
     bool is_not_null;      // [cite: 19]
     bool is_indexed;       // [cite: 20]
     bool has_default;      // [cite: 75]
-    int32_t default_int;   // Упрощение: храним дефолт только для INT
-
-    // В реальной СУБД дефолтные строки хранятся сложнее,
-    // но для начала ограничимся этим.
+    int32_t default_int;
+    uint32_t default_string_id; // Added support for string defaults
 };
 
 struct pos_t {
