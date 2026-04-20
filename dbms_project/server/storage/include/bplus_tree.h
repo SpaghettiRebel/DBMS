@@ -36,6 +36,9 @@ private:
     static constexpr const size_t minimum_keys_in_node = t - 1;
     static constexpr const size_t maximum_keys_in_node = 2 * t - 1;
 
+    Pager* _pager;
+    uint32_t _root_page_id;
+
     // region comparators declaration
 
     inline bool compare_keys(const tkey& lhs, const tkey& rhs) const;

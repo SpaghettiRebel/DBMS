@@ -63,7 +63,7 @@ Engine::Engine(std::string root) : root_path(std::move(root)) {
 
 void Engine::use_database(const std::string& name) {
     fs::path db_path = fs::path(root_path) / name;
-    if (!fs::exists(db_path)) throw std::runtime_error("База данных не существует");
+    if (!fs::exists(db_path)) throw std::runtime_error("No DB");
     current_db = name;
     string_pool = std::make_unique<StringPool>((db_path / "strings.dat").string());
     journal = std::make_unique<Journal>((db_path / "journal.dat").string());
@@ -96,19 +96,14 @@ void Engine::execute(const QueryPlan& plan) {
 
 void Engine::create_database(const std::string& name) {
     fs::path db_path = fs::path(root_path) / name;
-    if (fs::exists(db_path)) throw std::runtime_error("База данных уже существует");
+    if (fs::exists(db_path)) throw std::runtime_error("DB exists");
     fs::create_directories(db_path);
 }
 
 void Engine::drop_database(const std::string& name) {
     fs::path db_path = fs::path(root_path) / name;
-    if (!fs::exists(db_path)) throw std::runtime_error("База данных не существует");
+    if (!fs::exists(db_path)) throw std::runtime_error("No DB");
     fs::remove_all(db_path);
-    if (current_db == name) {
-        current_db = "";
-        string_pool.reset();
-        journal.reset();
-    }
 }
 
 void Engine::create_table(const QueryPlan& plan) {

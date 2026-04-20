@@ -102,7 +102,11 @@ public:
                 uint32_t id;
                 std::memcpy(&id, buffer + offset, sizeof(uint32_t));
                 offset += sizeof(uint32_t);
-                row[schema[i].name] = pool->get(id);
+                try {
+                    row[schema[i].name] = pool->get(id);
+                } catch(...) {
+                    row[schema[i].name] = "UNKNOWN_STRING_ID_" + std::to_string(id);
+                }
             }
         }
         return row;
