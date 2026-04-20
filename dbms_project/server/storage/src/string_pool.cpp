@@ -63,3 +63,9 @@ std::string StringPool::get(uint32_t id) const {
     }
     return id_to_str[id];
 }
+
+std::optional<uint32_t> StringPool::get_id_if_exists(const std::string& str) const {
+    auto it = str_to_id.find(str);
+    if (it != str_to_id.end()) return it->second;
+    return std::nullopt;
+}

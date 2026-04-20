@@ -14,10 +14,13 @@ private:
 
     void load();
 
+#include <optional>
+
 public:
     explicit StringPool(const std::string& path);
     ~StringPool();
 
     uint32_t intern(const std::string& str);
     std::string get(uint32_t id) const;
+    std::optional<uint32_t> get_id_if_exists(const std::string& str) const;
 };
