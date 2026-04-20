@@ -1,14 +1,15 @@
 #pragma once
-#include "../shared/QueryPlan.h"
-#include "file_manager.h"
-#include "bplus_tree.h"
-#include "string_pool.h"
-#include "journal.h"
-#include "table_metadata.h"
-#include <string>
 #include <map>
 #include <memory>
+#include <string>
 #include <vector>
+
+#include "../shared/QueryPlan.h"
+#include "bplus_tree.h"
+#include "file_manager.h"
+#include "journal.h"
+#include "string_pool.h"
+#include "table_metadata.h"
 
 class Engine {
 private:
@@ -23,7 +24,7 @@ private:
 
 public:
     explicit Engine(std::string root);
-    
+
     void execute(const QueryPlan& plan);
 
     void create_database(const std::string& name);

@@ -1,4 +1,5 @@
 #include "../include/journal.h"
+
 #include <chrono>
 #include <iomanip>
 #include <sstream>
