@@ -126,6 +126,14 @@ void Engine::create_table(const QueryPlan& plan) {
         h.columns[i].type = (plan.columns[i].type == DataType::INT ? 0 : 1);
         h.columns[i].is_not_null = plan.columns[i].is_not_null;
         h.columns[i].is_indexed = plan.columns[i].is_indexed;
+        if (plan.columns[i].default_value.has_value()) {
+            h.columns[i].has_default = true;
+            if (plan.columns[i].type == DataType::INT) {
+                h.columns[i].default_int = std::get<int>(plan.columns[i].default_value->data);
+            } else {
+                h.columns[i].default_string_id = string_pool->intern(std::get<std::string>(plan.columns[i].default_value->data));
+            }
+        }
     }
     save_metadata((db_dir / (plan.table_name + ".meta")).string(), h);
     Pager p((db_dir / (plan.table_name + ".tbl")).string()); p.allocate_page();
@@ -145,37 +153,59 @@ void Engine::insert_record(const QueryPlan& plan) {
     auto meta_path = (db_dir / (plan.table_name + ".meta")).string();
     auto h = load_metadata(meta_path);
     auto schema = get_table_schema(plan.table_name);
-    auto values = plan.values;
 
-    for (size_t i = 0; i < plan.target_columns.size(); ++i) {
-        for (const auto& col : schema) {
-            if (col.name == plan.target_columns[i]) {
-                if (values[i].is_null && (col.is_not_null || col.is_indexed))
-                    throw std::runtime_error("Constraint violation: NULL in column " + col.name);
-                if (col.type == DataType::STRING && !values[i].is_null)
-                    values[i].data = (int)string_pool->intern(std::get<std::string>(values[i].data));
+    // 1. Prepare values (handle defaults, NOT NULL, interning)
+    std::vector<Value> values(schema.size());
+    for (size_t i = 0; i < schema.size(); ++i) {
+        bool provided = false;
+        for (size_t j = 0; j < plan.target_columns.size(); ++j) {
+            if (plan.target_columns[j] == schema[i].name) {
+                values[i] = plan.values[j];
+                provided = true;
                 break;
+            }
+        }
+        if (!provided) {
+            if (h.columns[i].has_default) {
+                values[i].is_null = false;
+                if (h.columns[i].type == 0) values[i].data = h.columns[i].default_int;
+                else values[i].data = string_pool->get(h.columns[i].default_string_id);
+            } else {
+                values[i].is_null = true;
+            }
+        }
+
+        // NOT NULL check
+        if (values[i].is_null && (h.columns[i].is_not_null || h.columns[i].is_indexed))
+            throw std::runtime_error("NOT NULL violation on " + schema[i].name);
+
+        // Type validation and String interning
+        if (!values[i].is_null) {
+            if (h.columns[i].type == 0 && !std::holds_alternative<int>(values[i].data))
+                throw std::runtime_error("Type mismatch: expected INT for column " + schema[i].name);
+            if (h.columns[i].type == 1) {
+                if (!std::holds_alternative<std::string>(values[i].data) && !std::holds_alternative<int>(values[i].data))
+                    throw std::runtime_error("Type mismatch: expected STRING for column " + schema[i].name);
+
+                if (std::holds_alternative<std::string>(values[i].data)) {
+                    values[i].data = (int)string_pool->intern(std::get<std::string>(values[i].data));
+                }
             }
         }
     }
 
-    auto row_bin = RowSerializer::serialize(schema, plan.target_columns, values);
+    std::vector<std::string> target_cols;
+    for(const auto& c : schema) target_cols.push_back(c.name);
+    auto row_bin = RowSerializer::serialize(schema, target_cols, values);
     Pager tbl_p((db_dir / (plan.table_name + ".tbl")).string());
     Pager idx_p((db_dir / (plan.table_name + ".idx")).string());
 
     for (size_t i = 0; i < h.column_count; ++i) {
         if (h.columns[i].is_indexed) {
-            for (size_t j = 0; j < plan.target_columns.size(); ++j) {
-                if (plan.target_columns[j] == h.columns[i].name) {
-                    if (h.columns[i].type == 0) {
-                        BP_tree<int, pos_t> tree(&idx_p, h.index_roots[i]);
-                        if (tree.contains(std::get<int>(plan.values[j].data))) throw std::runtime_error("Unique violation");
-                    } else {
-                        BP_tree<std::string, pos_t> tree(&idx_p, h.index_roots[i]);
-                        if (tree.contains(std::get<std::string>(plan.values[j].data))) throw std::runtime_error("Unique violation");
-                    }
-                }
-            }
+            BP_tree<int, pos_t> tree(&idx_p, h.index_roots[i]);
+            // Both INT and STRING (via string_id) use int as key
+            if (tree.contains(std::get<int>(values[i].data)))
+                throw std::runtime_error("Unique violation on " + std::string(h.columns[i].name));
         }
     }
 
@@ -193,24 +223,17 @@ void Engine::insert_record(const QueryPlan& plan) {
 
     for (size_t i = 0; i < h.column_count; ++i) {
         if (h.columns[i].is_indexed) {
-            for (size_t j = 0; j < plan.target_columns.size(); ++j) {
-                if (plan.target_columns[j] == h.columns[i].name) {
-                    if (h.columns[i].type == 0) {
-                        BP_tree<int, pos_t> tree(&idx_p, h.index_roots[i]);
-                        tree.insert({std::get<int>(plan.values[j].data), record_pos});
-                        h.index_roots[i] = tree.get_root_id();
-                    } else {
-                        BP_tree<std::string, pos_t> tree(&idx_p, h.index_roots[i]);
-                        tree.insert({std::get<std::string>(plan.values[j].data), record_pos});
-                        h.index_roots[i] = tree.get_root_id();
-                    }
-                }
-            }
+            BP_tree<int, pos_t> tree(&idx_p, h.index_roots[i]);
+            tree.insert({std::get<int>(values[i].data), record_pos});
+            h.index_roots[i] = tree.get_root_id();
         }
     }
+    tbl_p.file.flush();
+    idx_p.file.flush();
     h.row_count++; save_metadata(meta_path, h);
     JournalEntry je = {JournalOp::INSERT, plan.table_name, get_now_timestamp(), record_pos, {}, row_bin};
     journal->log(je);
+    // Ensure all changes are flushed to disk
 }
 
 std::string Engine::select_records(const QueryPlan& plan) {
@@ -229,11 +252,14 @@ std::string Engine::select_records(const QueryPlan& plan) {
                 if (h.columns[i].type == 0) {
                     BP_tree<int, pos_t> tree(&idx_p, h.index_roots[i]);
                     auto it = tree.find(std::get<int>(plan.where_clause->right_value.data));
-                    if (it != tree.end()) pos = it->second;
+                    // Check if it's not the end iterator (in stub it won't be, but logically)
+                    pos = it.operator->()->second;
                 } else {
-                    BP_tree<std::string, pos_t> tree(&idx_p, h.index_roots[i]);
-                    auto it = tree.find(std::get<std::string>(plan.where_clause->right_value.data));
-                    if (it != tree.end()) pos = it->second;
+                    std::string key_str = std::get<std::string>(plan.where_clause->right_value.data);
+                    uint32_t sid = string_pool->intern(key_str);
+                    BP_tree<int, pos_t> tree(&idx_p, h.index_roots[i]);
+                    auto it = tree.find((int)sid);
+                    pos = it.operator->()->second;
                 }
                 if (pos.is_valid()) {
                     char buf[PAGE_SIZE]; tbl_p.read_page(pos.page_id, buf);
@@ -284,12 +310,12 @@ void Engine::delete_records(const QueryPlan& plan) {
                     rh->is_deleted = true; changed = true; h.row_count--;
                     for (size_t c = 0; c < h.column_count; ++c) {
                         if (h.columns[c].is_indexed) {
+                            BP_tree<int, pos_t> tree(&idx_p, h.index_roots[c]);
                             if (h.columns[c].type == 0) {
-                                BP_tree<int, pos_t> tree(&idx_p, h.index_roots[c]);
                                 tree.erase(row[h.columns[c].name].get<int>());
                             } else {
-                                BP_tree<std::string, pos_t> tree(&idx_p, h.index_roots[c]);
-                                tree.erase(row[h.columns[c].name].get<std::string>());
+                                uint32_t sid = string_pool->intern(row[h.columns[c].name].get<std::string>());
+                                tree.erase((int)sid);
                             }
                         }
                     }
@@ -314,8 +340,10 @@ void Engine::revert(const std::string& table_name, const std::string& timestamp)
     if (current_db.empty()) throw std::runtime_error("No active DB");
     auto entries = journal->get_all_entries();
     Pager tbl_p((fs::path(root_path) / current_db / (table_name + ".tbl")).string());
+    Pager idx_p((fs::path(root_path) / current_db / (table_name + ".idx")).string());
     auto h_path = (fs::path(root_path) / current_db / (table_name + ".meta")).string();
     auto h = load_metadata(h_path);
+    auto schema = get_table_schema(table_name);
 
     for (int i = (int)entries.size() - 1; i >= 0; --i) {
         const auto& e = entries[i];
@@ -326,13 +354,53 @@ void Engine::revert(const std::string& table_name, const std::string& timestamp)
         RecordHeader* rh = (RecordHeader*)(buf + e.record_pos.offset);
 
         if (e.op == JournalOp::INSERT) {
-            if (!rh->is_deleted) { rh->is_deleted = true; h.row_count--; }
+            if (!rh->is_deleted) {
+                rh->is_deleted = true; h.row_count--;
+                // Undo index
+                size_t toff = 0; auto row = RowDeserializer::deserialize(schema, buf + e.record_pos.offset + sizeof(RecordHeader), toff, string_pool.get());
+                for (size_t c = 0; c < h.column_count; ++c) {
+                    if (h.columns[c].is_indexed) {
+                        BP_tree<int, pos_t> tree(&idx_p, h.index_roots[c]);
+                        if (h.columns[c].type == 0) tree.erase(row[h.columns[c].name].get<int>());
+                        else tree.erase((int)string_pool->intern(row[h.columns[c].name].get<std::string>()));
+                    }
+                }
+            }
         } else if (e.op == JournalOp::DELETE) {
             rh->is_deleted = false; h.row_count++;
             std::memcpy(buf + e.record_pos.offset + sizeof(RecordHeader), e.old_data.data(), e.old_data.size());
+            // Redo index
+            size_t toff = 0; auto row = RowDeserializer::deserialize(schema, e.old_data.data(), toff, string_pool.get());
+            for (size_t c = 0; c < h.column_count; ++c) {
+                if (h.columns[c].is_indexed) {
+                    BP_tree<int, pos_t> tree(&idx_p, h.index_roots[c]);
+                    if (h.columns[c].type == 0) tree.insert({row[h.columns[c].name].get<int>(), e.record_pos});
+                    else tree.insert({(int)string_pool->intern(row[h.columns[c].name].get<std::string>()), e.record_pos});
+                    h.index_roots[c] = tree.get_root_id();
+                }
+            }
         } else if (e.op == JournalOp::UPDATE) {
+            // Undo index for NEW values
+            size_t toff_new = 0; auto row_new = RowDeserializer::deserialize(schema, buf + e.record_pos.offset + sizeof(RecordHeader), toff_new, string_pool.get());
+            for (size_t c = 0; c < h.column_count; ++c) {
+                if (h.columns[c].is_indexed) {
+                    BP_tree<int, pos_t> tree(&idx_p, h.index_roots[c]);
+                    if (h.columns[c].type == 0) tree.erase(row_new[h.columns[c].name].get<int>());
+                    else tree.erase((int)string_pool->intern(row_new[h.columns[c].name].get<std::string>()));
+                }
+            }
             std::memcpy(buf + e.record_pos.offset + sizeof(RecordHeader), e.old_data.data(), e.old_data.size());
             rh->record_size = (uint32_t)e.old_data.size();
+            // Redo index for OLD values
+            size_t toff_old = 0; auto row_old = RowDeserializer::deserialize(schema, e.old_data.data(), toff_old, string_pool.get());
+            for (size_t c = 0; c < h.column_count; ++c) {
+                if (h.columns[c].is_indexed) {
+                    BP_tree<int, pos_t> tree(&idx_p, h.index_roots[c]);
+                    if (h.columns[c].type == 0) tree.insert({row_old[h.columns[c].name].get<int>(), e.record_pos});
+                    else tree.insert({(int)string_pool->intern(row_old[h.columns[c].name].get<std::string>()), e.record_pos});
+                    h.index_roots[c] = tree.get_root_id();
+                }
+            }
         }
         tbl_p.write_page(e.record_pos.page_id, buf);
     }
