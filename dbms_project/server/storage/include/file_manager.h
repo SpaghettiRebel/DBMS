@@ -7,8 +7,9 @@
 constexpr size_t PAGE_SIZE = 4096;  // Размер одной страницы в байтах
 
 class Pager {
-private:
+public:
     std::fstream file;
+private:
     std::string filename;
     size_t num_pages;
 
