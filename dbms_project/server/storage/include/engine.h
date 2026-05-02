@@ -19,12 +19,11 @@ private:
 
     std::string get_table_path(const std::string& table_name);
     std::vector<ColumnDef> get_table_schema(const std::string& table_name);
-    std::vector<std::string> get_all_column_names(const std::vector<ColumnDef>& schema);
     void update_table_header(const std::string& table_name, const TableHeader& header);
 
 public:
     explicit Engine(std::string root);
-    
+
     void execute(const QueryPlan& plan);
 
     void create_database(const std::string& name);

@@ -4,7 +4,6 @@
 #include <unordered_map>
 #include <fstream>
 #include <cstdint>
-#include <optional>
 
 class StringPool {
 private:
@@ -14,6 +13,8 @@ private:
     std::fstream file;
 
     void load();
+
+#include <optional>
 
 public:
     explicit StringPool(const std::string& path);

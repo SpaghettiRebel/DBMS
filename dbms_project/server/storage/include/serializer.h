@@ -12,11 +12,11 @@ using json = nlohmann::json;
 class RowSerializer {
 public:
     // Сериализация: превращаем список значений в байты согласно схеме таблицы
-    static std::vector<char> serialize(const std::vector<ColumnDef>& schema, 
+    static std::vector<char> serialize(const std::vector<ColumnDef>& schema,
                                        const std::vector<std::string>& target_columns,
                                        const std::vector<Value>& values) {
         std::vector<char> buffer;
-        
+
         std::vector<Value> row_values(schema.size());
         for (size_t i = 0; i < schema.size(); ++i) {
             bool found = false;
@@ -51,7 +51,7 @@ public:
             if (schema[i].type == DataType::INT) {
                 int val = std::get<int>(row_values[i].data);
                 append_bytes(buffer, val);
-            } 
+            }
             else if (schema[i].type == DataType::STRING) {
                 // If it's a string, it might be already interned (stored as int/uint32_t)
                 if (std::holds_alternative<int>(row_values[i].data)) {
