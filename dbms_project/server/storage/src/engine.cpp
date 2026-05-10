@@ -121,7 +121,7 @@ BP_tree<int, pos_t> open_index_tree(Pager& idx_p, uint32_t& root_page_id) {
 }
 
 void flush_index_tree(BP_tree<int, pos_t>& tree, uint32_t& root_page_id) {
-    tree.flush();
+    tree.persist_to_disk();  // Явная персистентность дерева
     root_page_id = tree.get_root_id();
 }
 
@@ -840,6 +840,13 @@ void Engine::insert_record(const QueryPlan& plan) {
         *reinterpret_cast<uint32_t*>(page_buf.data()) = offset + sizeof(rh) + static_cast<uint32_t>(row_bin.size());
         tbl_p.write_page(h.last_data_page, page_buf.data());
 
+        // Логирование операции в WAL перед коммитом
+        if (wal) {
+            uint64_t txn_id = start_transaction();
+            log_operation_insert(txn_id, plan.table_name, record_pos, row_bin);
+            commit_transaction(txn_id);
+        }
+
         for (size_t i = 0; i < h.column_count; ++i) {
             if (!h.columns[i].is_indexed) continue;
 
@@ -861,6 +868,7 @@ void Engine::insert_record(const QueryPlan& plan) {
             journal->log(je);
         }
 
+        // Синхронизация всех файлов
         tbl_p.file.flush();
         idx_p.file.flush();
     } catch (...) {
