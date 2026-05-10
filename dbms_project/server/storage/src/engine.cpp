@@ -909,12 +909,26 @@ std::string Engine::select_records(const QueryPlan& plan) {
     auto h = load_metadata_checked((db_dir / (plan.table_name + ".meta")).string());
     auto schema = get_table_schema(plan.table_name);
     
+    // Проверяем наличие агрегатных функций
+    bool has_aggregates = false;
+    for (const auto& col : plan.columns) {
+        if (col.agg_type != AggregateType::NONE) {
+            has_aggregates = true;
+            break;
+        }
+    }
+    
     // Используем QueryOptimizer для выбора плана выполнения
     ExecutionPlan exec_plan = query_optimizer->analyze(plan.table_name, 
                                                         plan.where_clause.get(), 
                                                         schema);
     
     json res = json::array();
+
+    if (has_aggregates) {
+        // Обработка запроса с агрегатными функциями
+        return select_with_aggregates(db_dir, plan, schema, h, exec_plan);
+    }
 
     if (exec_plan.strategy == ExecutionStrategy::INDEX_SEEK || 
         exec_plan.strategy == ExecutionStrategy::INDEX_RANGE_SCAN) {
@@ -1603,5 +1617,155 @@ std::string Engine::select_full_scan(const fs::path& db_dir,
         }
     }
     
+    return res.dump(4);
+}
+
+std::string Engine::select_with_aggregates(const fs::path& db_dir,
+                                            const QueryPlan& plan,
+                                            const Schema& schema,
+                                            const TableHeader& h,
+                                            const ExecutionPlan& exec_plan) {
+    // Подготовка агрегатных результатов
+    std::vector<AggregateResult> agg_results;
+    std::vector<size_t> agg_column_indices; // Индексы колонок в схеме для агрегации
+    
+    for (size_t i = 0; i < plan.columns.size(); ++i) {
+        const auto& col = plan.columns[i];
+        if (col.agg_type != AggregateType::NONE) {
+            agg_results.emplace_back();
+            agg_results.back().reset(col.agg_type);
+            
+            // Находим индекс колонки в схеме
+            int col_idx = -1;
+            for (size_t j = 0; j < schema.size(); ++j) {
+                if (schema[j].name == col.column_name || col.column_name == "*") {
+                    col_idx = static_cast<int>(j);
+                    break;
+                }
+            }
+            agg_column_indices.push_back(col_idx >= 0 ? static_cast<size_t>(col_idx) : 0);
+        }
+    }
+    
+    // Получаем данные (через индекс или full scan)
+    std::vector<json> matching_rows;
+    
+    if (exec_plan.strategy == ExecutionStrategy::INDEX_SEEK || 
+        exec_plan.strategy == ExecutionStrategy::INDEX_RANGE_SCAN) {
+        std::vector<RID> matching_rids = execute_indexed_select(plan.table_name, exec_plan);
+        Pager tbl_p((db_dir / (plan.table_name + ".tbl")).string());
+        
+        for (const auto& rid : matching_rids) {
+            if (!is_valid_page_and_offset(rid)) continue;
+            
+            std::vector<char> buf(PAGE_SIZE, 0);
+            tbl_p.read_page(rid.page_id, buf.data());
+
+            if (rid.offset + sizeof(RecordHeader) <= PAGE_SIZE) {
+                auto* rh = reinterpret_cast<RecordHeader*>(buf.data() + rid.offset);
+                if (!rh->is_deleted &&
+                    is_live_record_layout(rid.offset, *reinterpret_cast<uint32_t*>(buf.data()), rh)) {
+                    size_t d_off = rid.offset + sizeof(RecordHeader);
+                    auto row = RowDeserializer::deserialize(schema, buf.data(), d_off, string_pool.get());
+                    
+                    if (!plan.where_clause || ConditionEvaluator::evaluate(row, plan.where_clause.get())) {
+                        matching_rows.push_back(row);
+                    }
+                }
+            }
+        }
+    } else {
+        // Full scan
+        Pager tbl_p((db_dir / (plan.table_name + ".tbl")).string());
+        
+        for (uint32_t i = 0; i <= h.last_data_page; ++i) {
+            std::vector<char> buf(PAGE_SIZE, 0);
+            tbl_p.read_page(i, buf.data());
+
+            uint32_t end_off = *reinterpret_cast<uint32_t*>(buf.data());
+            if (end_off <= kPageHeaderSize || end_off > PAGE_SIZE) continue;
+
+            size_t off = kPageHeaderSize;
+            while (off < end_off) {
+                if (off + sizeof(RecordHeader) > end_off) break;
+                auto* rh = reinterpret_cast<RecordHeader*>(buf.data() + off);
+                if (!is_live_record_layout(off, end_off, rh)) break;
+
+                size_t data_off = off + sizeof(RecordHeader);
+                if (!rh->is_deleted) {
+                    auto row = RowDeserializer::deserialize(schema, buf.data(), data_off, string_pool.get());
+                    if (!plan.where_clause || ConditionEvaluator::evaluate(row, plan.where_clause.get())) {
+                        matching_rows.push_back(row);
+                    }
+                }
+
+                off += sizeof(RecordHeader) + rh->record_size;
+            }
+        }
+    }
+    
+    // Вычисляем агрегаты
+    for (size_t i = 0; i < agg_results.size(); ++i) {
+        size_t schema_idx = agg_column_indices[i];
+        const std::string& col_name = schema[schema_idx].name;
+        
+        for (const auto& row : matching_rows) {
+            std::variant<std::monostate, int64_t, std::string> val;
+            
+            if (row.contains(col_name)) {
+                const auto& cell = row.at(col_name);
+                if (cell.is_null()) {
+                    val = std::monostate{};
+                } else if (cell.is_number_integer()) {
+                    val = cell.get<int64_t>();
+                } else if (cell.is_string()) {
+                    val = cell.get<std::string>();
+                } else {
+                    val = std::monostate{};
+                }
+            } else {
+                val = std::monostate{};
+            }
+            
+            agg_results[i].accumulate(val);
+        }
+    }
+    
+    // Формируем результат
+    json result_row;
+    for (size_t i = 0; i < plan.columns.size(); ++i) {
+        const auto& col = plan.columns[i];
+        std::string output_name = col.alias.empty() ? 
+            (col.agg_type != AggregateType::NONE ? 
+                aggregate_type_to_string(col.agg_type) + "(" + col.column_name + ")" : 
+                col.column_name) : 
+            col.alias;
+        
+        if (col.agg_type != AggregateType::NONE) {
+            // Находим соответствующий результат агрегации
+            int agg_idx = -1;
+            for (size_t j = 0; j < agg_results.size(); ++j) {
+                if (plan.columns[j].column_name == col.column_name && 
+                    plan.columns[j].agg_type == col.agg_type) {
+                    agg_idx = static_cast<int>(j);
+                    break;
+                }
+            }
+            
+            if (agg_idx >= 0) {
+                auto final_val = agg_results[agg_idx].get_final_value();
+                if (std::holds_alternative<int64_t>(final_val)) {
+                    result_row[output_name] = std::get<int64_t>(final_val);
+                } else if (std::holds_alternative<double>(final_val)) {
+                    result_row[output_name] = std::get<double>(final_val);
+                } else {
+                    result_row[output_name] = nullptr;
+                }
+            }
+        }
+    }
+    
+    json res = json::array();
+    res.push_back(result_row);
     return res.dump(4);
 }
