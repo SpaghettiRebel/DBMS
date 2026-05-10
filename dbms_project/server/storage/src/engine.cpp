@@ -113,6 +113,18 @@ void write_page_copy(Pager& pager, uint32_t page_id, const std::vector<char>& bu
     pager.write_page(page_id, const_cast<char*>(buf.data()));
 }
 
+BP_tree<int, pos_t> open_index_tree(Pager& idx_p, uint32_t& root_page_id) {
+    if (root_page_id == 0) {
+        root_page_id = idx_p.allocate_page();
+    }
+    return BP_tree<int, pos_t>(&idx_p, root_page_id);
+}
+
+void flush_index_tree(BP_tree<int, pos_t>& tree, uint32_t& root_page_id) {
+    tree.flush();
+    root_page_id = tree.get_root_id();
+}
+
 std::optional<uint32_t> resolve_string_id(StringPool* pool, const std::string& s, bool allow_create) {
     if (!pool) return std::nullopt;
     if (allow_create) {
@@ -236,7 +248,7 @@ bool build_insert_values(const QueryPlan& plan, const std::vector<ColumnDef>& sc
     }
 
     for (size_t i = 0; i < plan.target_columns.size(); ++i) {
-        if (!col_index.contains(plan.target_columns[i])) {
+        if (col_index.find(plan.target_columns[i]) == col_index.end()) {
             throw std::runtime_error("Unknown column: " + plan.target_columns[i]);
         }
         for (size_t j = i + 1; j < plan.target_columns.size(); ++j) {
@@ -626,14 +638,18 @@ void Engine::create_table(const QueryPlan& plan) {
         }
     }
 
-    save_metadata_atomic(meta_path.string(), h);
-
     Pager tbl_p(tbl_path.string());
     tbl_p.allocate_page();
 
-    // ensure idx file exists
+    // ensure idx file exists and reserve a stable root page per indexed column
     Pager idx_p(idx_path.string());
-    (void)idx_p;
+    for (size_t i = 0; i < h.column_count; ++i) {
+        if (h.columns[i].is_indexed && h.index_roots[i] == 0) {
+            h.index_roots[i] = idx_p.allocate_page();
+        }
+    }
+
+    save_metadata_atomic(meta_path.string(), h);
 }
 
 void Engine::drop_table(const std::string& table_name) {
@@ -702,7 +718,7 @@ void Engine::insert_record(const QueryPlan& plan) {
             throw std::runtime_error("Index key conversion failed on " + std::string(h.columns[i].name));
         }
 
-        BP_tree<int, pos_t> tree(&idx_p, h.index_roots[i]);
+        BP_tree<int, pos_t> tree = open_index_tree(idx_p, h.index_roots[i]);
         if (tree_contains_key(tree, key)) {
             throw std::runtime_error("Unique violation on " + std::string(h.columns[i].name));
         }
@@ -746,9 +762,9 @@ void Engine::insert_record(const QueryPlan& plan) {
                 throw std::runtime_error("Index key conversion failed on " + std::string(h.columns[i].name));
             }
 
-            BP_tree<int, pos_t> tree(&idx_p, h.index_roots[i]);
+            BP_tree<int, pos_t> tree = open_index_tree(idx_p, h.index_roots[i]);
             tree.insert({key, record_pos});
-            h.index_roots[i] = tree.get_root_id();
+            flush_index_tree(tree, h.index_roots[i]);
         }
 
         h.row_count++;
@@ -796,9 +812,10 @@ std::string Engine::select_records(const QueryPlan& plan) {
     if (plan.where_clause && plan.where_clause->is_leaf && plan.where_clause->op == OpType::EQ) {
         for (size_t i = 0; i < h.column_count; ++i) {
             if (!h.columns[i].is_indexed || h.columns[i].name != plan.where_clause->left_column) continue;
+            if (h.index_roots[i] == 0) continue;
 
             pos_t pos = pos_t::invalid();
-            BP_tree<int, pos_t> tree(&idx_p, h.index_roots[i]);
+            BP_tree<int, pos_t> tree = open_index_tree(idx_p, h.index_roots[i]);
 
             if (h.columns[i].type == 0) {
                 if (std::holds_alternative<int>(plan.where_clause->right_value.data)) {
@@ -904,7 +921,7 @@ void Engine::delete_records(const QueryPlan& plan) {
                         for (size_t c = 0; c < h.column_count; ++c) {
                             if (!h.columns[c].is_indexed) continue;
 
-                            BP_tree<int, pos_t> tree(&idx_p, h.index_roots[c]);
+                            BP_tree<int, pos_t> tree = open_index_tree(idx_p, h.index_roots[c]);
                             int key = 0;
 
                             if (h.columns[c].type == 0) {
@@ -931,7 +948,7 @@ void Engine::delete_records(const QueryPlan& plan) {
                             }
 
                             tree.erase(key);
-                            h.index_roots[c] = tree.get_root_id();
+                            flush_index_tree(tree, h.index_roots[c]);
                         }
 
                         rh->is_deleted = true;
@@ -985,7 +1002,7 @@ void Engine::update_records(const QueryPlan& plan) {
 
     auto col_index = build_column_index(schema);
     for (size_t i = 0; i < plan.target_columns.size(); ++i) {
-        if (!col_index.contains(plan.target_columns[i])) {
+        if (col_index.find(plan.target_columns[i]) == col_index.end()) {
             throw std::runtime_error("Unknown column: " + plan.target_columns[i]);
         }
         for (size_t j = i + 1; j < plan.target_columns.size(); ++j) {
@@ -1052,7 +1069,7 @@ void Engine::update_records(const QueryPlan& plan) {
                                     "Failed to extract new index key on " + std::string(h.columns[c].name));
                             }
 
-                            BP_tree<int, pos_t> tree(&idx_p, h.index_roots[c]);
+                            BP_tree<int, pos_t> tree = open_index_tree(idx_p, h.index_roots[c]);
                             const pos_t current_pos{page_id, static_cast<uint32_t>(off)};
 
                             // if key changes, it must be unique; if key same, current row is allowed
@@ -1088,10 +1105,10 @@ void Engine::update_records(const QueryPlan& plan) {
                                 }
 
                                 if (old_key != new_key) {
-                                    BP_tree<int, pos_t> tree(&idx_p, h.index_roots[c]);
+                                    BP_tree<int, pos_t> tree = open_index_tree(idx_p, h.index_roots[c]);
                                     tree.erase(old_key);
                                     tree.insert({new_key, old_pos});
-                                    h.index_roots[c] = tree.get_root_id();
+                                    flush_index_tree(tree, h.index_roots[c]);
                                 }
                             }
 
@@ -1146,10 +1163,10 @@ void Engine::update_records(const QueryPlan& plan) {
                                             "Failed to extract new index key on " + std::string(h.columns[c].name));
                                     }
 
-                                    BP_tree<int, pos_t> tree(&idx_p, h.index_roots[c]);
+                                    BP_tree<int, pos_t> tree = open_index_tree(idx_p, h.index_roots[c]);
                                     tree.erase(old_key);
                                     tree.insert({new_key, new_pos});
-                                    h.index_roots[c] = tree.get_root_id();
+                                    flush_index_tree(tree, h.index_roots[c]);
                                     changed_indexes.push_back({c, {old_key, new_key}});
                                 }
 
@@ -1176,7 +1193,7 @@ void Engine::update_records(const QueryPlan& plan) {
                                 try {
                                     for (size_t c = 0; c < h.column_count; ++c) {
                                         if (!h.columns[c].is_indexed) continue;
-                                        BP_tree<int, pos_t> tree(&idx_p, h.index_roots[c]);
+                                        BP_tree<int, pos_t> tree = open_index_tree(idx_p, h.index_roots[c]);
                                         int old_key = 0;
                                         int new_key = 0;
                                         if (json_to_storage_key(row.at(h.columns[c].name), h.columns[c].type == 0,
@@ -1185,7 +1202,7 @@ void Engine::update_records(const QueryPlan& plan) {
                                                 string_pool.get(), true)) {
                                             tree.erase(new_key);
                                             tree.insert({old_key, old_pos});
-                                            h.index_roots[c] = tree.get_root_id();
+                                            flush_index_tree(tree, h.index_roots[c]);
                                         }
                                     }
                                 } catch (...) {
@@ -1197,7 +1214,6 @@ void Engine::update_records(const QueryPlan& plan) {
                             }
                         }
 
-                        h.row_count = h.row_count;  // keep semantic clarity
                         page_changed = true;
                     }
                 }
@@ -1262,14 +1278,14 @@ void Engine::revert(const std::string& table_name, const std::string& timestamp)
                 for (size_t c = 0; c < h.column_count; ++c) {
                     if (!h.columns[c].is_indexed) continue;
 
-                    BP_tree<int, pos_t> tree(&idx_p, h.index_roots[c]);
+                    BP_tree<int, pos_t> tree = open_index_tree(idx_p, h.index_roots[c]);
                     int key = 0;
                     if (!json_to_storage_key(
                             row.at(h.columns[c].name), h.columns[c].type == 0, key, string_pool.get(), false)) {
                         throw std::runtime_error("String pool corruption during REVERT INSERT");
                     }
                     tree.erase(key);
-                    h.index_roots[c] = tree.get_root_id();
+                    flush_index_tree(tree, h.index_roots[c]);
                 }
 
                 rh->is_deleted = true;
@@ -1290,14 +1306,14 @@ void Engine::revert(const std::string& table_name, const std::string& timestamp)
                 for (size_t c = 0; c < h.column_count; ++c) {
                     if (!h.columns[c].is_indexed) continue;
 
-                    BP_tree<int, pos_t> tree(&idx_p, h.index_roots[c]);
+                    BP_tree<int, pos_t> tree = open_index_tree(idx_p, h.index_roots[c]);
                     int key = 0;
                     if (!json_to_storage_key(
                             row.at(h.columns[c].name), h.columns[c].type == 0, key, string_pool.get(), false)) {
                         throw std::runtime_error("String pool corruption during REVERT DELETE");
                     }
                     tree.insert({key, e.record_pos});
-                    h.index_roots[c] = tree.get_root_id();
+                    flush_index_tree(tree, h.index_roots[c]);
                 }
 
                 h.row_count++;
@@ -1316,7 +1332,7 @@ void Engine::revert(const std::string& table_name, const std::string& timestamp)
 
                     for (size_t c = 0; c < h.column_count; ++c) {
                         if (!h.columns[c].is_indexed) continue;
-                        BP_tree<int, pos_t> tree(&idx_p, h.index_roots[c]);
+                        BP_tree<int, pos_t> tree = open_index_tree(idx_p, h.index_roots[c]);
 
                         int cur_key = 0;
                         int old_key = 0;
@@ -1332,7 +1348,7 @@ void Engine::revert(const std::string& table_name, const std::string& timestamp)
                         if (cur_key != old_key) {
                             tree.erase(cur_key);
                             tree.insert({old_key, e.record_pos});
-                            h.index_roots[c] = tree.get_root_id();
+                            flush_index_tree(tree, h.index_roots[c]);
                         }
                     }
 
@@ -1356,7 +1372,7 @@ void Engine::revert(const std::string& table_name, const std::string& timestamp)
 
                     for (size_t c = 0; c < h.column_count; ++c) {
                         if (!h.columns[c].is_indexed) continue;
-                        BP_tree<int, pos_t> tree(&idx_p, h.index_roots[c]);
+                        BP_tree<int, pos_t> tree = open_index_tree(idx_p, h.index_roots[c]);
 
                         int old_key = 0;
                         int new_key = 0;
@@ -1371,7 +1387,7 @@ void Engine::revert(const std::string& table_name, const std::string& timestamp)
 
                         tree.erase(new_key);
                         tree.insert({old_key, e.record_pos});
-                        h.index_roots[c] = tree.get_root_id();
+                        flush_index_tree(tree, h.index_roots[c]);
                     }
 
                     std::memcpy(old_page.data() + e.record_pos.offset + sizeof(RecordHeader), e.old_data.data(),

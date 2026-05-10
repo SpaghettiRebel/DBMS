@@ -1,15 +1,69 @@
 #include <associative_container.h>
+#include <file_manager.h>
 #include <not_implemented.h>
 #include <pp_allocator.h>
 
 #include <algorithm>
 #include <boost/container/static_vector.hpp>
 #include <concepts>
+#include <cstdint>
+#include <cstring>
 #include <initializer_list>
 #include <iterator>
+#include <limits>
 #include <stack>
+#include <stdexcept>
+#include <string>
+#include <type_traits>
 #include <utility>
 #include <vector>
+
+namespace bptree_disk_detail {
+
+template <typename T>
+struct is_std_string : std::false_type {};
+
+template <typename CharT, typename Traits, typename Alloc>
+struct is_std_string<std::basic_string<CharT, Traits, Alloc>> : std::true_type {};
+
+template <typename T>
+inline void append_value(std::vector<char>& out, const T& value) {
+    if constexpr (is_std_string<T>::value) {
+        const uint64_t size = static_cast<uint64_t>(value.size());
+        append_value(out, size);
+        out.insert(out.end(), value.begin(), value.end());
+
+    } else {
+        static_assert(std::is_trivially_copyable_v<T>,
+            "B+ tree persistence supports trivially copyable types and std::string only");
+        const auto* ptr = reinterpret_cast<const char*>(&value);
+        out.insert(out.end(), ptr, ptr + sizeof(T));
+    }
+}
+
+template <typename T>
+inline T read_value(const char*& cur, const char* end) {
+    if constexpr (is_std_string<T>::value) {
+        const uint64_t size = read_value<uint64_t>(cur, end);
+        if (size > static_cast<uint64_t>(end - cur)) {
+            throw std::runtime_error("Corrupted B+ tree snapshot");
+        }
+        std::string res(cur, cur + static_cast<std::ptrdiff_t>(size));
+        cur += static_cast<std::ptrdiff_t>(size);
+        return res;
+    } else {
+        static_assert(std::is_trivially_copyable_v<T>,
+            "B+ tree persistence supports trivially copyable types and std::string only");
+        if (static_cast<std::size_t>(end - cur) < sizeof(T)) {
+            throw std::runtime_error("Corrupted B+ tree snapshot");
+        }
+        T value{};
+        std::memcpy(&value, cur, sizeof(T));
+        cur += sizeof(T);
+        return value;
+    }
+}
+}  // namespace bptree_disk_detail
 
 #ifndef SYS_PROG_B_PLUS_TREE_H
 #define SYS_PROG_B_PLUS_TREE_H
@@ -57,7 +111,28 @@ private:
     bptree_node_base* _root;
     size_t _size;
 
+    Pager* _pager;
+    uint32_t _root_page_id;
+    bool _persistent;
+    mutable bool _dirty;
+
     pp_allocator<value_type> get_allocator() const noexcept;
+
+    static constexpr uint32_t disk_magic = 0x31545042u;  // 'BPT1'
+    static constexpr uint32_t disk_version = 1u;
+    struct disk_header {
+        uint32_t magic;
+        uint32_t version;
+        uint64_t payload_size;
+        uint64_t item_count;
+    };
+    void mark_dirty() noexcept { _dirty = true; }
+    void ensure_page_exists(uint32_t page_id);
+    void serialize_node(std::vector<char>& out, const bptree_node_base* node) const;
+    bptree_node_base* deserialize_node(const char*& cur, const char* end);
+    void collect_leaves(bptree_node_base* node, std::vector<bptree_node_term*>& leaves) const noexcept;
+    void persist_to_disk();
+    void load_from_disk();
 
 public:
     // region constructors declaration
@@ -256,6 +331,9 @@ public:
     bptree_iterator erase(const tkey& key);
 
     // endregion modifiers declaration
+
+    uint32_t get_root_id() const noexcept { return _root_page_id; }
+    void flush();
 };
 
 template <std::input_iterator iterator,
