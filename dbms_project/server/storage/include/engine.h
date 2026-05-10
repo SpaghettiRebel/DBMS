@@ -9,12 +9,16 @@
 #include "binary_file_manager.h"
 #include "query_optimizer.h"
 #include "schema_manager.h"
+#include "aggregates.h"
 #include <string>
 #include <map>
 #include <memory>
 #include <vector>
 #include <mutex>
 #include <unordered_map>
+#include <filesystem>
+
+namespace fs = std::filesystem;
 
 class Engine {
 private:
@@ -58,6 +62,13 @@ private:
                                             const ExecutionPlan& plan);
     std::vector<Record> execute_full_scan(const std::string& table_name, 
                                           const ConditionNode* where_clause);
+    
+    // Методы для работы с агрегатными функциями
+    std::string select_with_aggregates(const fs::path& db_dir,
+                                        const QueryPlan& plan,
+                                        const Schema& schema,
+                                        const TableHeader& h,
+                                        const ExecutionPlan& exec_plan);
     
 public:
     explicit Engine(std::string root);

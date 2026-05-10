@@ -7,33 +7,31 @@ build/
 dist/
 
 # Dependencies
-venv/
-.venv/
-__pycache__/
-*.egg-info/
 node_modules/
-
-# Editors
-.vscode/
-.idea/
-*.swp
-*.swo
+.venv/
+venv/
+__pycache__/
+.mypy_cache/
+.pytest_cache/
+target/
+.gradle/
 
 # Logs and temp files
 *.log
 *.tmp
+*.swp
+*.swo
 
 # Environment
 .env
 .env.local
 *.env.*
 
-# Coverage reports
-coverage/
-htmlcov/
-*.coverage
+# Editors
+.vscode/
+.idea/
 
-# OS generated files
+# System files
 .DS_Store
 Thumbs.db
 ```
