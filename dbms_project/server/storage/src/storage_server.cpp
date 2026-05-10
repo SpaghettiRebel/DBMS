@@ -1,5 +1,6 @@
 #include "storage_server.h"
 #include "engine.h"
+#include "access_logger.h"
 
 #include <iostream>
 #include <cstring>
@@ -321,16 +322,34 @@ bool StorageServer::write_message(int fd, const StorageMessage& msg) {
 }
 
 void StorageServer::process_request(const StorageMessage& msg, int client_fd) {
+    auto start_time = std::chrono::steady_clock::now();
+    auto start_time_ms = std::chrono::duration_cast<std::chrono::milliseconds>(
+        std::chrono::system_clock::now().time_since_epoch()).count();
+    
     StorageMessage response;
     response.request_id = msg.request_id;
     response.timestamp = std::chrono::duration_cast<std::chrono::milliseconds>(
         std::chrono::system_clock::now().time_since_epoch()).count();
+
+    std::string status = "SUCCESS";
+    std::string error_msg;
+    int status_code = 0;
 
     switch (msg.type) {
         case StorageMessage::Type::MSG_PING: {
             response.type = StorageMessage::Type::MSG_PONG;
             response.payload = "OK";
             write_message(client_fd, response);
+            
+            // Логирование PING
+            dbms::LogEntry ping_entry;
+            ping_entry.client_id = std::to_string(client_fd);
+            ping_entry.request_id = std::to_string(msg.request_id);
+            ping_entry.query_body = "PING";
+            ping_entry.start_time_ms = start_time_ms;
+            ping_entry.end_time_ms = start_time_ms;
+            ping_entry.status_code = 0;
+            dbms::AccessLogger::instance().log(ping_entry);
             break;
         }
         
@@ -351,11 +370,17 @@ void StorageServer::process_request(const StorageMessage& msg, int client_fd) {
                 response.type = StorageMessage::Type::MSG_RESPONSE;
                 response.payload = result;
                 write_message(client_fd, response);
+                
+                status = "SUCCESS";
+                status_code = 0;
             } catch (const std::exception& e) {
                 response.type = StorageMessage::Type::MSG_ERROR;
                 response.payload = e.what();
                 write_message(client_fd, response);
                 total_errors_++;
+                status = "ERROR";
+                error_msg = e.what();
+                status_code = 1;
             }
             break;
         }
@@ -365,9 +390,29 @@ void StorageServer::process_request(const StorageMessage& msg, int client_fd) {
             response.payload = "Unknown message type";
             write_message(client_fd, response);
             total_errors_++;
+            status = "ERROR";
+            error_msg = "Unknown message type";
+            status_code = 2;
             break;
         }
     }
+    
+    // Вычисление длительности
+    auto end_time = std::chrono::steady_clock::now();
+    auto duration = std::chrono::duration_cast<std::chrono::milliseconds>(end_time - start_time).count();
+    auto end_time_ms = std::chrono::duration_cast<std::chrono::milliseconds>(
+        std::chrono::system_clock::now().time_since_epoch()).count();
+    
+    // Логирование запроса в Access Log
+    dbms::LogEntry log_entry;
+    log_entry.client_id = std::to_string(client_fd);
+    log_entry.request_id = std::to_string(msg.request_id);
+    log_entry.query_body = msg.payload;
+    log_entry.start_time_ms = start_time_ms;
+    log_entry.end_time_ms = end_time_ms;
+    log_entry.status_code = status_code;
+    log_entry.error_msg = error_msg;
+    dbms::AccessLogger::instance().log(log_entry);
 }
 
 std::vector<uint8_t> StorageServer::serialize_message(const StorageMessage& msg) {
