@@ -5,10 +5,14 @@
 #include "string_pool.h"
 #include "journal.h"
 #include "table_metadata.h"
+#include "wal_manager.h"
+#include "binary_file_manager.h"
 #include <string>
 #include <map>
 #include <memory>
 #include <vector>
+#include <mutex>
+#include <unordered_map>
 
 class Engine {
 private:
@@ -16,13 +20,34 @@ private:
     std::string current_db;
     std::unique_ptr<StringPool> string_pool;
     std::unique_ptr<Journal> journal;
+    std::unique_ptr<WriteAheadLog> wal;
+    
+    // Менеджеры бинарных файлов для открытых таблиц
+    std::unordered_map<std::string, std::unique_ptr<BinaryFileManager>> table_managers_;
+    std::mutex table_mutex_;
+    
+    // Активные транзакции
+    std::unordered_map<uint64_t, std::string> active_transactions_;
+    std::mutex txn_mutex_;
 
     std::string get_table_path(const std::string& table_name);
     std::vector<ColumnDef> get_table_schema(const std::string& table_name);
     void update_table_header(const std::string& table_name, const TableHeader& header);
+    
+    // Вспомогательные методы для работы с WAL
+    uint64_t start_transaction();
+    void commit_transaction(uint64_t txn_id);
+    void log_operation_insert(uint64_t txn_id, const std::string& table, 
+                              const pos_t& pos, const std::vector<char>& data);
+    void log_operation_update(uint64_t txn_id, const std::string& table,
+                              const pos_t& pos, const std::vector<char>& old_data,
+                              const std::vector<char>& new_data);
+    void log_operation_delete(uint64_t txn_id, const std::string& table,
+                              const pos_t& pos, const std::vector<char>& old_data);
 
 public:
     explicit Engine(std::string root);
+    ~Engine();
 
     void execute(const QueryPlan& plan);
 
@@ -39,4 +64,7 @@ public:
     void delete_records(const QueryPlan& plan);
 
     void revert(const std::string& table_name, const std::string& timestamp);
+    
+    // Восстановление из WAL при старте
+    void recover_from_wal();
 };

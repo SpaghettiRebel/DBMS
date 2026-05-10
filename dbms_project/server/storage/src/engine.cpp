@@ -513,6 +513,92 @@ Engine::Engine(std::string root) : root_path(std::move(root)) {
     if (!fs::exists(root_path)) {
         fs::create_directories(root_path);
     }
+    
+    // Инициализация WAL (Write-Ahead Log) для обеспечения целостности данных
+    std::string wal_path = fs::path(root_path) / "wal.dat";
+    wal = std::make_unique<WriteAheadLog>(wal_path);
+    
+    // Восстановление из WAL при старте системы
+    recover_from_wal();
+}
+
+Engine::~Engine() {
+    // Синхронизация всех данных при закрытии
+    if (wal) {
+        wal->sync();
+    }
+    
+    std::lock_guard<std::mutex> lock(table_mutex_);
+    for (auto& [name, manager] : table_managers_) {
+        if (manager) {
+            manager->sync();
+        }
+    }
+}
+
+// ============================================================================
+// Управление транзакциями через WAL
+// ============================================================================
+
+uint64_t Engine::start_transaction() {
+    std::lock_guard<std::mutex> lock(txn_mutex_);
+    uint64_t txn_id = wal->beginTransaction();
+    return txn_id;
+}
+
+void Engine::commit_transaction(uint64_t txn_id) {
+    wal->commitTransaction(txn_id);
+    std::lock_guard<std::mutex> lock(txn_mutex_);
+    active_transactions_.erase(txn_id);
+}
+
+void Engine::log_operation_insert(uint64_t txn_id, const std::string& table,
+                                   const pos_t& pos, const std::vector<char>& data) {
+    wal->logInsert(txn_id, table, pos, data);
+}
+
+void Engine::log_operation_update(uint64_t txn_id, const std::string& table,
+                                   const pos_t& pos, const std::vector<char>& old_data,
+                                   const std::vector<char>& new_data) {
+    wal->logUpdate(txn_id, table, pos, old_data, new_data);
+}
+
+void Engine::log_operation_delete(uint64_t txn_id, const std::string& table,
+                                   const pos_t& pos, const std::vector<char>& old_data) {
+    wal->logDelete(txn_id, table, pos, old_data);
+}
+
+// ============================================================================
+// Восстановление из WAL после сбоя
+// ============================================================================
+
+void Engine::recover_from_wal() {
+    if (!wal) {
+        return;
+    }
+    
+    wal->recover([this](const WALRecord& record) {
+        // Применяем каждую запись из WAL для восстановления состояния
+        // В текущей реализации данные уже записаны в файлы, поэтому
+        // восстановление не требуется. В production здесь была бы логика
+        // отката незавершенных транзакций или повторного применения операций.
+        switch (record.operation) {
+            case WALOperationType::OP_INSERT:
+            case WALOperationType::OP_UPDATE:
+            case WALOperationType::OP_DELETE:
+            case WALOperationType::OP_PAGE_WRITE:
+                // Данные уже персистентны в файлах
+                break;
+                
+            case WALOperationType::OP_REVERT:
+                // Обработка операции отката к указанному времени
+                break;
+                
+            case WALOperationType::OP_CHECKPOINT:
+                // Пропускаем checkpoint записи
+                break;
+        }
+    });
 }
 
 void Engine::use_database(const std::string& name) {

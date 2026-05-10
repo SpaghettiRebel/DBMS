@@ -141,6 +141,10 @@ public:
 
     explicit BP_tree(pp_allocator<value_type> alloc, const compare& comp = compare());
 
+    // Конструктор для персистентного дерева с Pager
+    explicit BP_tree(Pager* pager, uint32_t root_page_id = 0, const compare& cmp = compare(),
+        pp_allocator<value_type> = pp_allocator<value_type>());
+
     template <input_iterator_for_pair<tkey, tvalue> iterator>
     explicit BP_tree(iterator begin, iterator end, const compare& cmp = compare(),
         pp_allocator<value_type> = pp_allocator<value_type>());
@@ -870,6 +874,7 @@ std::pair<typename BP_tree<tkey, tvalue, compare, t>::bptree_iterator, bool> BP_
         _root = _allocator.template new_object<bptree_node_term>();
         static_cast<bptree_node_term*>(_root)->_data.push_back(std::move(pair));
         _size = 1;
+        mark_dirty();
 
         return {bptree_iterator(static_cast<bptree_node_term*>(_root), 0), true};
     }
@@ -929,6 +934,7 @@ std::pair<typename BP_tree<tkey, tvalue, compare, t>::bptree_iterator, bool> BP_
     size_t idx = std::distance(term->_data.begin(), it);
     term->_data.insert(it, std::move(pair));
     _size++;
+    mark_dirty();
 
     return {bptree_iterator(term, idx), true};
 }
@@ -954,6 +960,7 @@ typename BP_tree<tkey, tvalue, compare, t>::bptree_iterator BP_tree<tkey, tvalue
 
     if (it != end()) {
         it->second = std::move(pair.second);
+        mark_dirty();
         return it;
     }
 
@@ -1027,6 +1034,7 @@ BP_tree<tkey, tvalue, compare, t>::bptree_node_base* BP_tree<tkey, tvalue, compa
         if (it != term->_data.end() && !compare_keys(key, it->first)) {
             term->_data.erase(it);
             erased = true;
+            mark_dirty();
         }
         return term;
     } else {
@@ -1058,6 +1066,8 @@ BP_tree<tkey, tvalue, compare, t>::bptree_node_base* BP_tree<tkey, tvalue, compa
                     right_child = static_cast<bptree_node_middle*>(right_child)->_pointers[0];
                 middle->_keys[i] = static_cast<bptree_node_term*>(right_child)->_data.front().first;
             }
+            
+            mark_dirty();
         }
         return middle;
     }
