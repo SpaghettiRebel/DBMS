@@ -1,7 +1,7 @@
 cmake_minimum_required(VERSION 3.10)
 project(DBMS_Project VERSION 1.0 LANGUAGES CXX)
 
-set(CMAKE_CXX_STANDARD 14)
+set(CMAKE_CXX_STANDARD 17)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
 set(CMAKE_EXPORT_COMPILE_COMMANDS ON)
 
@@ -64,3 +64,29 @@ target_include_directories(test_binary_file_manager PRIVATE
 target_link_libraries(test_binary_file_manager pthread)
 
 add_test(NAME BinaryFileManagerTest COMMAND test_binary_file_manager)
+# Cluster Entrypoint (Sharding)
+set(CLUSTER_SOURCES
+    server/cluster/src/cluster_entrypoint.cpp
+    server/cluster/src/storage_node.cpp
+    server/cluster/src/shard_manager.cpp
+    server/cluster/src/heartbeat_monitor.cpp
+    server/cluster/src/async_request_queue.cpp
+    server/cluster/src/telemetry_collector.cpp
+    server/cluster/src/main_cluster.cpp
+)
+
+set(CLUSTER_HEADERS
+    server/cluster/include/cluster_entrypoint.h
+    server/cluster/include/storage_node.h
+    server/cluster/include/shard_manager.h
+    server/cluster/include/heartbeat_monitor.h
+    server/cluster/include/async_request_queue.h
+    server/cluster/include/telemetry_collector.h
+)
+
+add_executable(cluster_entrypoint ${CLUSTER_SOURCES} ${CLUSTER_HEADERS})
+target_include_directories(cluster_entrypoint PRIVATE
+    ${PROJECT_SOURCE_DIR}/server/cluster/include
+    ${PROJECT_SOURCE_DIR}/shared
+)
+target_link_libraries(cluster_entrypoint pthread)
