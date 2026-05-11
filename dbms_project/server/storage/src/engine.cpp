@@ -106,12 +106,7 @@ std::vector<char> read_page_copy(Pager& pager, uint32_t page_id) {
     return buf;
 }
 
-void write_page_copy(Pager& pager, uint32_t page_id, const std::vector<char>& buf) {
-    if (buf.size() != PAGE_SIZE) {
-        throw std::runtime_error("Invalid page buffer size");
-    }
-    pager.write_page(page_id, const_cast<char*>(buf.data()));
-}
+// write_page_copy removed - unused function
 
 BP_tree<int, pos_t> open_index_tree(Pager& idx_p, uint32_t& root_page_id) {
     if (root_page_id == 0) {
@@ -344,7 +339,7 @@ json payload_to_json_row(const std::vector<char>& payload, const std::vector<Col
 }
 
 std::optional<pos_t> find_live_record_by_payload(Pager& tbl_p, const TableHeader& h,
-    const std::vector<ColumnDef>& schema, const std::vector<char>& payload, StringPool* pool) {
+    const std::vector<ColumnDef>& /*schema*/, const std::vector<char>& payload, StringPool* /*pool*/) {
     for (uint32_t page_id = 0; page_id <= h.last_data_page; ++page_id) {
         std::vector<char> buf(PAGE_SIZE, 0);
         tbl_p.read_page(page_id, buf.data());
@@ -377,11 +372,7 @@ bool tree_contains_key(BP_tree<int, pos_t>& tree, int key) {
     return it != tree.end();
 }
 
-std::optional<pos_t> tree_lookup(BP_tree<int, pos_t>& tree, int key) {
-    auto it = tree.find(key);
-    if (it == tree.end()) return std::nullopt;
-    return it->second;
-}
+// tree_lookup removed - unused function
 
 bool index_key_unique_for_pos(BP_tree<int, pos_t>& tree, int key, const pos_t& current_pos) {
     auto it = tree.find(key);
@@ -1206,7 +1197,7 @@ void Engine::update_records(const QueryPlan& plan) {
                         } else {
                             // resize: append new row, then tombstone old row
                             std::vector<char> append_backup = read_page_copy(tbl_p, h.last_data_page);
-                            uint32_t old_last_page = h.last_data_page;
+                            // uint32_t old_last_page = h.last_data_page; // unused
 
                             // append new physical record
                             std::vector<char> append_buf(PAGE_SIZE, 0);
@@ -1517,7 +1508,7 @@ std::vector<ColumnDef> Engine::get_table_schema(const std::string& table_name) {
 }
 // Реализация методов оптимизированного выполнения запросов
 
-std::vector<RID> Engine::execute_indexed_select(const std::string& table_name, const ExecutionPlan& plan) {
+std::vector<RID> Engine::execute_indexed_select(const std::string& /*table_name*/, const ExecutionPlan& plan) {
     std::vector<RID> result;
 
     if (plan.index_path.empty()) {
@@ -1586,7 +1577,7 @@ std::string Engine::select_with_aggregates(const fs::path& db_dir, const QueryPl
 
     for (size_t i = 0; i < plan.select_targets.size(); ++i) {
         const auto& col = plan.select_targets[i];
-        if (col.aggregate != ::AggregateType::NONE) {
+        if (col.aggregate != AggregateType::NONE) {
             agg_results.emplace_back();
             agg_results.back().reset(static_cast<dbms::AggregateType>(col.aggregate));
 
@@ -1691,12 +1682,12 @@ std::string Engine::select_with_aggregates(const fs::path& db_dir, const QueryPl
     for (size_t i = 0; i < plan.select_targets.size(); ++i) {
         const auto& col = plan.select_targets[i];
         std::string output_name = col.alias.empty()
-                                      ? (col.aggregate != ::AggregateType::NONE
+                                      ? (col.aggregate != AggregateType::NONE
                                                 ? aggregate_type_to_string(static_cast<dbms::AggregateType>(col.aggregate)) + "(" + col.column_name + ")"
                                                 : col.column_name)
                                       : col.alias;
 
-        if (col.aggregate != ::AggregateType::NONE) {
+        if (col.aggregate != AggregateType::NONE) {
             // Находим соответствующий результат агрегации
             int agg_idx = -1;
             for (size_t j = 0; j < agg_results.size(); ++j) {
