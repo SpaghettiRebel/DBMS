@@ -2,8 +2,48 @@
 #include <algorithm>
 #include <cmath>
 #include <filesystem>
+#include <limits>
 
 namespace fs = std::filesystem;
+
+// Helper functions for Value type
+namespace {
+    Value make_max_value(DataType type) {
+        Value v;
+        v.is_null = false;
+        if (type == DataType::INT) {
+            v.data = std::numeric_limits<int>::max();
+        } else {
+            v.data = std::string(255, '\xFF');
+        }
+        return v;
+    }
+    
+    Value make_min_value(DataType type) {
+        Value v;
+        v.is_null = false;
+        if (type == DataType::INT) {
+            v.data = std::numeric_limits<int>::min();
+        } else {
+            v.data = std::string();
+        }
+        return v;
+    }
+    
+    const ColumnDef* find_column(const Schema& schema, const std::string& name) {
+        for (const auto& col : schema) {
+            if (col.name == name) {
+                return &col;
+            }
+        }
+        return nullptr;
+    }
+    
+    // Estimate row count - in real system this would come from statistics
+    size_t estimate_row_count(const Schema& /*schema*/) {
+        return 1000; // Default estimate
+    }
+}
 
 QueryOptimizer::QueryOptimizer(const std::string& db_root_path) 
     : db_root_(db_root_path) {}
@@ -37,7 +77,7 @@ ExecutionPlan QueryOptimizer::analyze(const std::string& table_name,
                                       const Schema& schema) {
     ExecutionPlan plan;
     plan.strategy = ExecutionStrategy::FULL_TABLE_SCAN;
-    plan.estimated_cost = schema.estimate_row_count(); // Стоимость полного сканирования
+    plan.estimated_cost = static_cast<double>(estimate_row_count(schema)); // Стоимость полного сканирования
 
     if (!where_clause) {
         return plan;
@@ -73,7 +113,7 @@ ExecutionPlan QueryOptimizer::analyze(const std::string& table_name,
     plan.index_path = get_index_path(best.table_name, best.column_name);
     plan.indexed_column = best.column_name;
     plan.predicate_type = best.type;
-    plan.estimated_cost = std::log2(schema.estimate_row_count() + 1); // O(log N)
+    plan.estimated_cost = std::log2(static_cast<double>(estimate_row_count(schema)) + 1); // O(log N)
 
     if (best.type == PredicateType::EQUALS) {
         plan.strategy = ExecutionStrategy::INDEX_SEEK;
@@ -103,18 +143,20 @@ void QueryOptimizer::collect_candidates(const ConditionNode* node,
     if (!node) return;
 
     // Рекурсивный обход дерева условий (поддержка AND/OR)
-    if (node->type == ConditionNodeType::AND || node->type == ConditionNodeType::OR) {
-        if (node->left) collect_candidates(node->left, table_name, schema, candidates);
-        if (node->right) collect_candidates(node->right, table_name, schema, candidates);
+    if (!node->is_leaf) {
+        if (node->logical_op == LogicalOpType::AND || node->logical_op == LogicalOpType::OR) {
+            if (node->left_child) collect_candidates(node->left_child.get(), table_name, schema, candidates);
+            if (node->right_child) collect_candidates(node->right_child.get(), table_name, schema, candidates);
+        }
         return;
     }
 
     // Обрабатываем листовой предикат
-    if (node->type == ConditionNodeType::PREDICATE) {
-        std::string col_name = node->left_operand;
+    if (node->is_leaf) {
+        std::string col_name = node->left_column;
         
         // Проверяем, является ли колонка индексированной по схеме
-        const ColumnDef* col_def = schema.get_column(col_name);
+        const ColumnDef* col_def = find_column(schema, col_name);
         if (!col_def || !col_def->is_indexed) {
             return; // Колонка не индексирована
         }
@@ -126,43 +168,42 @@ void QueryOptimizer::collect_candidates(const ConditionNode* node,
 
         // Анализ оператора сравнения
         switch (node->op) {
-            case CompareOp::EQ:
+            case OpType::EQ:
                 cand.type = PredicateType::EQUALS;
-                cand.search_value = node->right_operand;
+                cand.search_value = node->right_value;
                 break;
-            case CompareOp::GT:
+            case OpType::GREATER:
                 cand.type = PredicateType::GREATER;
-                cand.lower_bound = node->right_operand;
+                cand.lower_bound = node->right_value;
                 // Верхняя граница - макс возможное значение типа (упрощено)
-                cand.upper_bound = Value::max_for_type(col_def->type); 
+                cand.upper_bound = make_max_value(col_def->type); 
                 break;
-            case CompareOp::GE:
+            case OpType::GEQ:
                 cand.type = PredicateType::GREATER_EQ;
-                cand.lower_bound = node->right_operand;
-                cand.upper_bound = Value::max_for_type(col_def->type);
+                cand.lower_bound = node->right_value;
+                cand.upper_bound = make_max_value(col_def->type);
                 break;
-            case CompareOp::LT:
+            case OpType::LESS:
                 cand.type = PredicateType::LESS;
                 // Нижняя граница - мин возможное
-                cand.lower_bound = Value::min_for_type(col_def->type);
-                cand.upper_bound = node->right_operand;
+                cand.lower_bound = make_min_value(col_def->type);
+                cand.upper_bound = node->right_value;
                 break;
-            case CompareOp::LE:
+            case OpType::LEQ:
                 cand.type = PredicateType::LESS_EQ;
-                cand.lower_bound = Value::min_for_type(col_def->type);
-                cand.upper_bound = node->right_operand;
+                cand.lower_bound = make_min_value(col_def->type);
+                cand.upper_bound = node->right_value;
                 break;
-            case CompareOp::BETWEEN:
+            case OpType::BETWEEN:
                 cand.type = PredicateType::BETWEEN;
-                // right_operand должен быть парой значений или обработан парсером заранее
-                // Предполагаем, что парсер разбил BETWEEN на структуру с двумя значениями
-                if (node->right_operand.is_pair()) {
-                    cand.lower_bound = node->right_operand.get_lower();
-                    cand.upper_bound = node->right_operand.get_upper();
+                // right_value - нижняя граница, right_value_between - верхняя
+                cand.lower_bound = node->right_value;
+                if (node->right_value_between.has_value()) {
+                    cand.upper_bound = node->right_value_between.value();
                 }
                 break;
             default:
-                // !=, LIKE и другие пока не оптимизируем через индекс (или оптимизируем сложно)
+                // NEQ, LIKE и другие пока не оптимизируем через индекс (или оптимизируем сложно)
                 return;
         }
 
@@ -181,10 +222,8 @@ double QueryOptimizer::estimate_selectivity(const IndexCandidate& cand, const Sc
         case PredicateType::EQUALS:
             // Для уникальных полей (INDEXED часто уникальны) селективность ~ 1/N
             // Для обычных ~ 1/10 (допущение)
-            if (schema.get_column(cand.column_name)->is_unique) {
-                return 1.0 / std::max(1.0, (double)schema.estimate_row_count());
-            }
-            return 0.1; 
+            // Note: ColumnDef doesn't have is_unique, so we assume indexed columns are somewhat selective
+            return 1.0 / std::max(1.0, static_cast<double>(estimate_row_count(schema))); 
 
         case PredicateType::BETWEEN:
             // Допустим, диапазон покрывает 10-30% данных в среднем
