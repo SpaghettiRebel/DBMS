@@ -44,24 +44,31 @@ set(STORAGE_HEADERS
 )
 
 # Storage Server executable
-add_executable(storage_server ${STORAGE_SOURCES} ${STORAGE_HEADERS})
-target_include_directories(storage_server PRIVATE 
-    ${PROJECT_SOURCE_DIR}/server/storage/include
-    ${PROJECT_SOURCE_DIR}/shared
+add_library(storage_lib STATIC
+    server/storage/src/engine.cpp
+    server/storage/src/file_manager.cpp
+    server/storage/src/binary_file_manager.cpp
+    server/storage/src/bplus_tree_persistence.cpp
+    server/storage/src/wal_manager.cpp
+    server/storage/src/journal.cpp
+    server/storage/src/string_pool.cpp
+    server/storage/src/query_optimizer.cpp
+    server/storage/src/schema_manager.cpp
+    server/storage/src/access_logger.cpp
+    server/storage/src/storage_server.cpp
 )
-target_link_libraries(storage_server pthread)
 
-# Клиентское приложение (заглушка)
+# Исполняемый файл сервера теперь линкуется с библиотекой
+add_executable(storage_server server/storage/src/main_storage_server.cpp)
+target_link_libraries(storage_server storage_lib pthread)
+
+# Клиент
 add_executable(dbms_client client/main.cpp)
-target_include_directories(dbms_client PRIVATE ${PROJECT_SOURCE_DIR}/shared)
+# Если у клиента есть свой код, добавьте его здесь, пока заглушка
 
-# Тесты
-enable_testing()
+# Тесты линкуются с библиотекой
 add_executable(test_binary_file_manager server/storage/tests/test_binary_file_manager.cpp)
-target_include_directories(test_binary_file_manager PRIVATE 
-    ${PROJECT_SOURCE_DIR}/server/storage/include
-)
-target_link_libraries(test_binary_file_manager pthread)
+target_link_libraries(test_binary_file_manager storage_lib pthread)
 
 add_test(NAME BinaryFileManagerTest COMMAND test_binary_file_manager)
 # Cluster Entrypoint (Sharding)

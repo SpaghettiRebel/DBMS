@@ -1,13 +1,14 @@
 #pragma once
 #include <cstdint>
+
 #include "file_manager.h"
 
 // Исправлено название файла: bplus_node.h
 struct BPlusNodeHeader {
-    bool is_leaf;       // true - лист, false - внутренний узел 
-    uint32_t num_keys;  // Текущее количество ключей в узле
-    uint32_t parent;    // Номер страницы родителя (0 для корня)
-    uint32_t next_leaf; // Для листьев: связь в односвязный список для range-запросов [cite: 49]
+    bool is_leaf;        // true - лист, false - внутренний узел
+    uint32_t num_keys;   // Текущее количество ключей в узле
+    uint32_t parent;     // Номер страницы родителя (0 для корня)
+    uint32_t next_leaf;  // Для листьев: связь в односвязный список для range-запросов [cite: 49]
 };
 
 // Константы для B+ дерева (для ключей типа INT)
@@ -25,5 +26,5 @@ constexpr uint32_t MAX_KEYS_INTERNAL = (NODE_BODY_SIZE - sizeof(uint32_t)) / (si
 // Структура узла в памяти (для удобного наложения на буфер Pager)
 struct BPlusNode {
     BPlusNodeHeader header;
-    char data[NODE_BODY_SIZE]; // Сюда будем копировать ключи и указатели через memcpy
+    char data[NODE_BODY_SIZE];  // Сюда будем копировать ключи и указатели через memcpy
 };
