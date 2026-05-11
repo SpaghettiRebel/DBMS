@@ -1,6 +1,6 @@
 #pragma once
 #include "table_metadata.h"
-#include "bplus_tree.h"
+#include "../shared/QueryPlan.h"
 #include <string>
 #include <vector>
 #include <unordered_map>
@@ -8,17 +8,13 @@
 #include <memory>
 #include <fstream>
 
-// Структура описания колонки
-struct ColumnDef {
-    std::string name;
-    DataType type;
-    bool not_null;
-    bool indexed;
-    bool has_default;
-    Value default_value;
-    
-    ColumnDef() : type(DataType::INT), not_null(false), indexed(false), has_default(false) {}
-};
+// Используем типы из QueryPlan.h (они в глобальном namespace)
+using ColumnDef = ::ColumnDef;
+using Value = ::Value;
+using DataType = ::DataType;
+
+// Alias для схемы таблицы
+using Schema = std::vector<ColumnDef>;
 
 // Менеджер схем таблиц
 class SchemaManager {

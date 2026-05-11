@@ -12,7 +12,7 @@ namespace fs = std::filesystem;
 
 namespace {
 template <typename T>
-void write_pod(std::ofstream& out, const T& value) {
+void write_pod(std::fstream& out, const T& value) {
     out.write(reinterpret_cast<const char*>(&value), sizeof(T));
     if (!out) {
         throw std::runtime_error("Failed to write journal record");
@@ -20,17 +20,17 @@ void write_pod(std::ofstream& out, const T& value) {
 }
 
 template <typename T>
-bool read_pod(std::ifstream& in, T& value) {
+bool read_pod(std::fstream& in, T& value) {
     return static_cast<bool>(in.read(reinterpret_cast<char*>(&value), sizeof(T)));
 }
 
-bool read_bytes(std::ifstream& in, std::string& s, std::uint32_t len) {
+bool read_bytes(std::fstream& in, std::string& s, std::uint32_t len) {
     s.assign(len, '\0');
     if (len == 0) return true;
     return static_cast<bool>(in.read(s.data(), len));
 }
 
-bool read_bytes(std::ifstream& in, std::vector<char>& v, std::uint32_t len) {
+bool read_bytes(std::fstream& in, std::vector<char>& v, std::uint32_t len) {
     v.assign(len, 0);
     if (len == 0) return true;
     return static_cast<bool>(in.read(v.data(), len));

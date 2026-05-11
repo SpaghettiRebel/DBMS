@@ -20,15 +20,17 @@
 
 namespace fs = std::filesystem;
 
-// Используем типы из namespace dbms
-using dbms::Value;
-using dbms::Record;
-using dbms::RID;
-using dbms::AggregateResult;
-using dbms::aggregate_type_to_string;
+// Используем типы из QueryPlan.h (они в глобальном namespace)
+using Value = ::Value;
+using RID = pos_t;
+using AggregateResult = dbms::AggregateResult;
 
 // Alias для схемы таблицы
-using Schema = std::vector<ColumnDef>;
+using Schema = std::vector<::ColumnDef>;
+
+// Template alias для B+ дерева
+template<typename K, typename V>
+using BPlusTree = BP_tree<K, V>;
 
 class Engine {
 private:
@@ -70,8 +72,10 @@ private:
     // Методы оптимизированного выполнения запросов
     std::vector<RID> execute_indexed_select(const std::string& table_name, 
                                             const ExecutionPlan& plan);
-    std::vector<Record> execute_full_scan(const std::string& table_name, 
-                                          const ConditionNode* where_clause);
+    std::string select_full_scan(const fs::path& db_dir,
+                                  const QueryPlan& plan,
+                                  const Schema& schema,
+                                  const TableHeader& h);
     
     // Методы для работы с агрегатными функциями
     std::string select_with_aggregates(const fs::path& db_dir,
