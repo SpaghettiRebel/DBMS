@@ -43,7 +43,7 @@ struct __attribute__((packed)) PageHeader {
     uint32_t checksum;      // Контрольная сумма для проверки целостности
     uint64_t timestamp;     // Время последней модификации (Unix timestamp ms)
     
-    static constexpr size_t SIZE = 28;  // Реальный размер packed структуры
+    static constexpr size_t SIZE = 32;  // Реальный размер packed структуры
     
     PageHeader() : magic(BFM_MAGIC), page_id(0), type(PageType::FREE), 
                    version(BFM_VERSION), flags(0), data_size(0), 

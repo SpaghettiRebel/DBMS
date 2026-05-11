@@ -180,11 +180,10 @@ void BinaryFileManager::writePage(uint32_t page_id, const char* buffer,
         throw std::out_of_range("Invalid page ID: " + std::to_string(page_id));
     }
     
-    // Копируем данные в рабочий буфер
+    // Копируем данные в рабочий буфер после заголовка страницы
     std::vector<char> page_buffer(PAGE_SIZE, 0);
-    std::memcpy(page_buffer.data(), buffer, data_size);
     
-    // Устанавливаем заголовок страницы
+    // Устанавливаем заголовок страницы в начале буфера
     auto* header = reinterpret_cast<PageHeader*>(page_buffer.data());
     header->magic = BFM_MAGIC;
     header->page_id = page_id;
@@ -193,7 +192,12 @@ void BinaryFileManager::writePage(uint32_t page_id, const char* buffer,
     header->data_size = data_size;
     header->timestamp = getCurrentTimestamp();
     
-    // Вычисляем контрольную сумму
+    // Копируем пользовательские данные после заголовка
+    if (data_size > 0) {
+        std::memcpy(page_buffer.data() + PageHeader::SIZE, buffer, data_size);
+    }
+    
+    // Вычисляем контрольную сумму данных после заголовка
     header->checksum = header->compute_checksum(
         page_buffer.data() + PageHeader::SIZE,
         PAGE_SIZE - PageHeader::SIZE
