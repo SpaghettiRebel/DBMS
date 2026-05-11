@@ -18,13 +18,15 @@ std::string generate_guid_v4() {
         if (i == 4 || i == 6 || i == 8 || i == 10) {
             ss << '-';
         }
+        int val;
         if (i == 6) {
-            ss << dis2(gen);
+            val = dis2(gen);
         } else if (i == 8) {
-            ss << (dis(gen) & 0x3) | 0x8;
+            val = (dis(gen) & 0x3) | 0x8;
         } else {
-            ss << dis(gen);
+            val = dis(gen);
         }
+        ss << val;
     }
     
     return ss.str();
@@ -154,7 +156,7 @@ size_t AsyncRequestQueue::queue_size() const {
     return request_queue_.size();
 }
 
-AsyncRequestQueue::QueueStats AsyncRequestQueue::get_stats() const {
+AsyncRequestQueue::QueueStats AsyncRequestQueue::get_stats() {
     QueueStats stats;
     stats.total_submitted = total_submitted_.load();
     stats.total_completed = total_completed_.load();

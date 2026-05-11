@@ -122,7 +122,7 @@ public:
         double avg_execution_time_ms;
     };
     
-    QueueStats get_stats() const;
+    QueueStats get_stats();
 
 private:
     /**

@@ -20,6 +20,16 @@
 
 namespace fs = std::filesystem;
 
+// Используем типы из namespace dbms
+using dbms::Value;
+using dbms::Record;
+using dbms::RID;
+using dbms::AggregateResult;
+using dbms::aggregate_type_to_string;
+
+// Alias для схемы таблицы
+using Schema = std::vector<ColumnDef>;
+
 class Engine {
 private:
     std::string root_path;

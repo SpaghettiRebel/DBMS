@@ -93,7 +93,7 @@ private:
     /**
      * @brief Очистка старых данных
      */
-    void cleanup_old_data() const;
+    void cleanup_old_data();
     
     // Данные для вычисления RPS (временные метки запросов)
     mutable std::mutex rps_mutex_;
