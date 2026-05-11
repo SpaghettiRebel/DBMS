@@ -12,7 +12,7 @@ int64_t TelemetryCollector::now_ms() {
         std::chrono::steady_clock::now().time_since_epoch()).count();
 }
 
-void TelemetryCollector::cleanup_old_data() const {
+void TelemetryCollector::cleanup_old_data() {
     int64_t now = now_ms();
     
     // Очистка RPS данных (старше 10 минут)

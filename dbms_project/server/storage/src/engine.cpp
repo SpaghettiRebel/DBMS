@@ -1629,11 +1629,11 @@ std::string Engine::select_with_aggregates(const fs::path& db_dir,
     std::vector<AggregateResult> agg_results;
     std::vector<size_t> agg_column_indices; // Индексы колонок в схеме для агрегации
     
-    for (size_t i = 0; i < plan.columns.size(); ++i) {
-        const auto& col = plan.columns[i];
-        if (col.agg_type != AggregateType::NONE) {
+    for (size_t i = 0; i < plan.select_targets.size(); ++i) {
+        const auto& col = plan.select_targets[i];
+        if (col.aggregate != AggregateType::NONE) {
             agg_results.emplace_back();
-            agg_results.back().reset(col.agg_type);
+            agg_results.back().reset(col.aggregate);
             
             // Находим индекс колонки в схеме
             int col_idx = -1;
@@ -1733,20 +1733,20 @@ std::string Engine::select_with_aggregates(const fs::path& db_dir,
     
     // Формируем результат
     json result_row;
-    for (size_t i = 0; i < plan.columns.size(); ++i) {
-        const auto& col = plan.columns[i];
+    for (size_t i = 0; i < plan.select_targets.size(); ++i) {
+        const auto& col = plan.select_targets[i];
         std::string output_name = col.alias.empty() ? 
-            (col.agg_type != AggregateType::NONE ? 
-                aggregate_type_to_string(col.agg_type) + "(" + col.column_name + ")" : 
+            (col.aggregate != AggregateType::NONE ? 
+                aggregate_type_to_string(col.aggregate) + "(" + col.column_name + ")" : 
                 col.column_name) : 
             col.alias;
         
-        if (col.agg_type != AggregateType::NONE) {
+        if (col.aggregate != AggregateType::NONE) {
             // Находим соответствующий результат агрегации
             int agg_idx = -1;
             for (size_t j = 0; j < agg_results.size(); ++j) {
-                if (plan.columns[j].column_name == col.column_name && 
-                    plan.columns[j].agg_type == col.agg_type) {
+                if (plan.select_targets[j].column_name == col.column_name && 
+                    plan.select_targets[j].aggregate == col.aggregate) {
                     agg_idx = static_cast<int>(j);
                     break;
                 }
