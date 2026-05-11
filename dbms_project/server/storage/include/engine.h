@@ -1,5 +1,5 @@
 #pragma once
-#include "../shared/QueryPlan.h"
+#include "QueryPlan.h"
 #include "file_manager.h"
 #include "bplus_tree.h"
 #include "string_pool.h"

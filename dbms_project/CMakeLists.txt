@@ -58,6 +58,11 @@ add_library(storage_lib STATIC
     server/storage/src/storage_server.cpp
 )
 
+target_include_directories(storage_lib PUBLIC
+    ${PROJECT_SOURCE_DIR}/server/storage/include
+    ${PROJECT_SOURCE_DIR}/shared
+)
+
 # Исполняемый файл сервера теперь линкуется с библиотекой
 add_executable(storage_server server/storage/src/main_storage_server.cpp)
 target_link_libraries(storage_server storage_lib pthread)
