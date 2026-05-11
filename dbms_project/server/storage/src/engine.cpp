@@ -513,21 +513,21 @@ Engine::Engine(std::string root) : root_path(std::move(root)) {
     if (!fs::exists(root_path)) {
         fs::create_directories(root_path);
     }
-    
+
     // Инициализация StringPool для дедупликации строк
     std::string pool_path = fs::path(root_path) / "string_pool.dat";
     string_pool = std::make_unique<StringPool>(pool_path);
-    
+
     // Инициализация WAL (Write-Ahead Log) для обеспечения целостности данных
     std::string wal_path = fs::path(root_path) / "wal.dat";
     wal = std::make_unique<WriteAheadLog>(wal_path);
-    
+
     // Инициализация менеджера схем
     schema_manager = std::make_unique<SchemaManager>(root_path);
-    
+
     // Инициализация оптимизатора запросов
     query_optimizer = std::make_unique<QueryOptimizer>(root_path);
-    
+
     // Восстановление из WAL при старте системы
     recover_from_wal();
 }
@@ -537,7 +537,7 @@ Engine::~Engine() {
     if (wal) {
         wal->sync();
     }
-    
+
     std::lock_guard<std::mutex> lock(table_mutex_);
     for (auto& [name, manager] : table_managers_) {
         if (manager) {
@@ -562,19 +562,18 @@ void Engine::commit_transaction(uint64_t txn_id) {
     active_transactions_.erase(txn_id);
 }
 
-void Engine::log_operation_insert(uint64_t txn_id, const std::string& table,
-                                   const pos_t& pos, const std::vector<char>& data) {
+void Engine::log_operation_insert(
+    uint64_t txn_id, const std::string& table, const pos_t& pos, const std::vector<char>& data) {
     wal->logInsert(txn_id, table, pos, data);
 }
 
-void Engine::log_operation_update(uint64_t txn_id, const std::string& table,
-                                   const pos_t& pos, const std::vector<char>& old_data,
-                                   const std::vector<char>& new_data) {
+void Engine::log_operation_update(uint64_t txn_id, const std::string& table, const pos_t& pos,
+    const std::vector<char>& old_data, const std::vector<char>& new_data) {
     wal->logUpdate(txn_id, table, pos, old_data, new_data);
 }
 
-void Engine::log_operation_delete(uint64_t txn_id, const std::string& table,
-                                   const pos_t& pos, const std::vector<char>& old_data) {
+void Engine::log_operation_delete(
+    uint64_t txn_id, const std::string& table, const pos_t& pos, const std::vector<char>& old_data) {
     wal->logDelete(txn_id, table, pos, old_data);
 }
 
@@ -586,7 +585,7 @@ void Engine::recover_from_wal() {
     if (!wal) {
         return;
     }
-    
+
     wal->recover([this](const WALRecord& record) {
         // Применяем каждую запись из WAL для восстановления состояния
         // В текущей реализации данные уже записаны в файлы, поэтому
@@ -599,11 +598,11 @@ void Engine::recover_from_wal() {
             case WALOperationType::OP_PAGE_WRITE:
                 // Данные уже персистентны в файлах
                 break;
-                
+
             case WALOperationType::OP_REVERT:
                 // Обработка операции отката к указанному времени
                 break;
-                
+
             case WALOperationType::OP_CHECKPOINT:
                 // Пропускаем checkpoint записи
                 break;
@@ -908,7 +907,7 @@ std::string Engine::select_records(const QueryPlan& plan) {
     fs::path db_dir = fs::path(root_path) / current_db;
     auto h = load_metadata_checked((db_dir / (plan.table_name + ".meta")).string());
     auto schema = get_table_schema(plan.table_name);
-    
+
     // Проверяем наличие агрегатных функций
     bool has_aggregates = false;
     for (const auto& col : plan.columns) {
@@ -917,12 +916,10 @@ std::string Engine::select_records(const QueryPlan& plan) {
             break;
         }
     }
-    
+
     // Используем QueryOptimizer для выбора плана выполнения
-    ExecutionPlan exec_plan = query_optimizer->analyze(plan.table_name, 
-                                                        plan.where_clause.get(), 
-                                                        schema);
-    
+    ExecutionPlan exec_plan = query_optimizer->analyze(plan.table_name, plan.where_clause.get(), schema);
+
     json res = json::array();
 
     if (has_aggregates) {
@@ -930,16 +927,16 @@ std::string Engine::select_records(const QueryPlan& plan) {
         return select_with_aggregates(db_dir, plan, schema, h, exec_plan);
     }
 
-    if (exec_plan.strategy == ExecutionStrategy::INDEX_SEEK || 
+    if (exec_plan.strategy == ExecutionStrategy::INDEX_SEEK ||
         exec_plan.strategy == ExecutionStrategy::INDEX_RANGE_SCAN) {
         // Оптимизированный путь с использованием индекса
         std::vector<RID> matching_rids = execute_indexed_select(plan.table_name, exec_plan);
-        
+
         Pager tbl_p((db_dir / (plan.table_name + ".tbl")).string());
-        
+
         for (const auto& rid : matching_rids) {
             if (!is_valid_page_and_offset(rid)) continue;
-            
+
             std::vector<char> buf(PAGE_SIZE, 0);
             tbl_p.read_page(rid.page_id, buf.data());
 
@@ -949,7 +946,7 @@ std::string Engine::select_records(const QueryPlan& plan) {
                     is_live_record_layout(rid.offset, *reinterpret_cast<uint32_t*>(buf.data()), rh)) {
                     size_t d_off = rid.offset + sizeof(RecordHeader);
                     auto row = RowDeserializer::deserialize(schema, buf.data(), d_off, string_pool.get());
-                    
+
                     // Дополнительная фильтрация для сложных условий (AND/OR)
                     if (!plan.where_clause || ConditionEvaluator::evaluate(row, plan.where_clause.get())) {
                         res.push_back(row);
@@ -1514,49 +1511,46 @@ std::vector<ColumnDef> Engine::get_table_schema(const std::string& table_name) {
 }
 // Реализация методов оптимизированного выполнения запросов
 
-std::vector<RID> Engine::execute_indexed_select(const std::string& table_name, 
-                                                 const ExecutionPlan& plan) {
+std::vector<RID> Engine::execute_indexed_select(const std::string& table_name, const ExecutionPlan& plan) {
     std::vector<RID> result;
-    
+
     if (plan.index_path.empty()) {
         return result;
     }
-    
+
     // Открываем B+-дерево индекса
     Pager idx_p(plan.index_path);
-    
+
     // Для простоты используем старый API BP_tree, в будущем нужно мигрировать на новый BPlusTree
     // Здесь должна быть логика работы с новым BPlusTree<Value, RID>
     // Пока используем заглушку, которая будет заменена при полной интеграции
-    
+
     if (plan.predicate_type == PredicateType::EQUALS) {
         // Точечный поиск
         // В реальной реализации: tree.find(plan.search_key, rid)
         // Здесь нужна адаптация типов Value -> int/string
         // Заглушка для демонстрации архитектуры
-    } else if (plan.predicate_type == PredicateType::BETWEEN ||
-               plan.predicate_type == PredicateType::GREATER ||
+    } else if (plan.predicate_type == PredicateType::BETWEEN || plan.predicate_type == PredicateType::GREATER ||
                plan.predicate_type == PredicateType::LESS) {
         // Диапазонное сканирование
         // В реальной реализации: tree.range_scan(low, high, callback)
     }
-    
+
     return result;
 }
 
-std::vector<Record> Engine::execute_full_scan(const std::string& table_name, 
-                                               const ConditionNode* where_clause) {
+std::vector<Record> Engine::execute_full_scan(const std::string& table_name, const ConditionNode* where_clause) {
     std::vector<Record> result;
-    
+
     if (current_db.empty()) {
         return result;
     }
-    
+
     fs::path db_dir = fs::path(root_path) / current_db;
     auto h = load_metadata_checked((db_dir / (table_name + ".meta")).string());
     auto schema = get_table_schema(table_name);
     Pager tbl_p((db_dir / (table_name + ".tbl")).string());
-    
+
     for (uint32_t i = 0; i <= h.last_data_page; ++i) {
         std::vector<char> buf(PAGE_SIZE, 0);
         tbl_p.read_page(i, buf.data());
@@ -1581,17 +1575,15 @@ std::vector<Record> Engine::execute_full_scan(const std::string& table_name,
             off += sizeof(RecordHeader) + rh->record_size;
         }
     }
-    
+
     return result;
 }
 
-std::string Engine::select_full_scan(const fs::path& db_dir, 
-                                      const QueryPlan& plan,
-                                      const Schema& schema,
-                                      const TableHeader& h) {
+std::string Engine::select_full_scan(
+    const fs::path& db_dir, const QueryPlan& plan, const Schema& schema, const TableHeader& h) {
     json res = json::array();
     Pager tbl_p((db_dir / (plan.table_name + ".tbl")).string());
-    
+
     for (uint32_t i = 0; i <= h.last_data_page; ++i) {
         std::vector<char> buf(PAGE_SIZE, 0);
         tbl_p.read_page(i, buf.data());
@@ -1616,25 +1608,22 @@ std::string Engine::select_full_scan(const fs::path& db_dir,
             off += sizeof(RecordHeader) + rh->record_size;
         }
     }
-    
+
     return res.dump(4);
 }
 
-std::string Engine::select_with_aggregates(const fs::path& db_dir,
-                                            const QueryPlan& plan,
-                                            const Schema& schema,
-                                            const TableHeader& h,
-                                            const ExecutionPlan& exec_plan) {
+std::string Engine::select_with_aggregates(const fs::path& db_dir, const QueryPlan& plan, const Schema& schema,
+    const TableHeader& h, const ExecutionPlan& exec_plan) {
     // Подготовка агрегатных результатов
     std::vector<AggregateResult> agg_results;
-    std::vector<size_t> agg_column_indices; // Индексы колонок в схеме для агрегации
-    
-    for (size_t i = 0; i < plan.select_targets.size(); ++i) {
-        const auto& col = plan.select_targets[i];
-        if (col.aggregate != AggregateType::NONE) {
+    std::vector<size_t> agg_column_indices;  // Индексы колонок в схеме для агрегации
+
+    for (size_t i = 0; i < plan.columns.size(); ++i) {
+        const auto& col = plan.columns[i];
+        if (col.agg_type != AggregateType::NONE) {
             agg_results.emplace_back();
-            agg_results.back().reset(col.aggregate);
-            
+            agg_results.back().reset(col.agg_type);
+
             // Находим индекс колонки в схеме
             int col_idx = -1;
             for (size_t j = 0; j < schema.size(); ++j) {
@@ -1646,18 +1635,18 @@ std::string Engine::select_with_aggregates(const fs::path& db_dir,
             agg_column_indices.push_back(col_idx >= 0 ? static_cast<size_t>(col_idx) : 0);
         }
     }
-    
+
     // Получаем данные (через индекс или full scan)
     std::vector<json> matching_rows;
-    
-    if (exec_plan.strategy == ExecutionStrategy::INDEX_SEEK || 
+
+    if (exec_plan.strategy == ExecutionStrategy::INDEX_SEEK ||
         exec_plan.strategy == ExecutionStrategy::INDEX_RANGE_SCAN) {
         std::vector<RID> matching_rids = execute_indexed_select(plan.table_name, exec_plan);
         Pager tbl_p((db_dir / (plan.table_name + ".tbl")).string());
-        
+
         for (const auto& rid : matching_rids) {
             if (!is_valid_page_and_offset(rid)) continue;
-            
+
             std::vector<char> buf(PAGE_SIZE, 0);
             tbl_p.read_page(rid.page_id, buf.data());
 
@@ -1667,7 +1656,7 @@ std::string Engine::select_with_aggregates(const fs::path& db_dir,
                     is_live_record_layout(rid.offset, *reinterpret_cast<uint32_t*>(buf.data()), rh)) {
                     size_t d_off = rid.offset + sizeof(RecordHeader);
                     auto row = RowDeserializer::deserialize(schema, buf.data(), d_off, string_pool.get());
-                    
+
                     if (!plan.where_clause || ConditionEvaluator::evaluate(row, plan.where_clause.get())) {
                         matching_rows.push_back(row);
                     }
@@ -1677,7 +1666,7 @@ std::string Engine::select_with_aggregates(const fs::path& db_dir,
     } else {
         // Full scan
         Pager tbl_p((db_dir / (plan.table_name + ".tbl")).string());
-        
+
         for (uint32_t i = 0; i <= h.last_data_page; ++i) {
             std::vector<char> buf(PAGE_SIZE, 0);
             tbl_p.read_page(i, buf.data());
@@ -1703,15 +1692,15 @@ std::string Engine::select_with_aggregates(const fs::path& db_dir,
             }
         }
     }
-    
+
     // Вычисляем агрегаты
     for (size_t i = 0; i < agg_results.size(); ++i) {
         size_t schema_idx = agg_column_indices[i];
         const std::string& col_name = schema[schema_idx].name;
-        
+
         for (const auto& row : matching_rows) {
             std::variant<std::monostate, int64_t, std::string> val;
-            
+
             if (row.contains(col_name)) {
                 const auto& cell = row.at(col_name);
                 if (cell.is_null()) {
@@ -1726,32 +1715,31 @@ std::string Engine::select_with_aggregates(const fs::path& db_dir,
             } else {
                 val = std::monostate{};
             }
-            
+
             agg_results[i].accumulate(val);
         }
     }
-    
+
     // Формируем результат
     json result_row;
-    for (size_t i = 0; i < plan.select_targets.size(); ++i) {
-        const auto& col = plan.select_targets[i];
-        std::string output_name = col.alias.empty() ? 
-            (col.aggregate != AggregateType::NONE ? 
-                aggregate_type_to_string(col.aggregate) + "(" + col.column_name + ")" : 
-                col.column_name) : 
-            col.alias;
-        
-        if (col.aggregate != AggregateType::NONE) {
+    for (size_t i = 0; i < plan.columns.size(); ++i) {
+        const auto& col = plan.columns[i];
+        std::string output_name = col.alias.empty()
+                                      ? (col.agg_type != AggregateType::NONE
+                                                ? aggregate_type_to_string(col.agg_type) + "(" + col.column_name + ")"
+                                                : col.column_name)
+                                      : col.alias;
+
+        if (col.agg_type != AggregateType::NONE) {
             // Находим соответствующий результат агрегации
             int agg_idx = -1;
             for (size_t j = 0; j < agg_results.size(); ++j) {
-                if (plan.select_targets[j].column_name == col.column_name && 
-                    plan.select_targets[j].aggregate == col.aggregate) {
+                if (plan.columns[j].column_name == col.column_name && plan.columns[j].agg_type == col.agg_type) {
                     agg_idx = static_cast<int>(j);
                     break;
                 }
             }
-            
+
             if (agg_idx >= 0) {
                 auto final_val = agg_results[agg_idx].get_final_value();
                 if (std::holds_alternative<int64_t>(final_val)) {
@@ -1764,7 +1752,7 @@ std::string Engine::select_with_aggregates(const fs::path& db_dir,
             }
         }
     }
-    
+
     json res = json::array();
     res.push_back(result_row);
     return res.dump(4);

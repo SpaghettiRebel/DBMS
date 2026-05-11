@@ -1,19 +1,17 @@
-#pragma once
-#include <concepts>
-#include <iterator>
-#include <utility>
-#include <functional>
+#ifndef ASSOCIATIVE_CONTAINER_H
+#define ASSOCIATIVE_CONTAINER_H
 
-// Concept for comparator - works with std::less, std::greater, etc.
-// Supports both old-style comparators with member types and simple callable comparators
-template<typename T, typename Key>
-concept comparator = requires(T comp, const Key& a, const Key& b) {
-    { comp(a, b) } -> std::convertible_to<bool>;
-};
+#include <iostream>
+#include <vector>
 
-// Simplified concept for input iterator that produces pairs
-template<typename Iter, typename Key, typename Value>
-concept input_iterator_for_pair = std::input_iterator<Iter> && 
-    requires(Iter it) {
-        { *it } -> std::convertible_to<std::pair<Key, Value>>;
-    };
+template <typename compare, typename tkey>
+concept comparator = requires(const compare c, const tkey& lhs, const tkey& rhs) {
+    { c(lhs, rhs) } -> std::same_as<bool>;
+} && std::copyable<compare> && std::default_initializable<compare>;
+
+template <typename f_iter, typename tkey, typename tval>
+concept input_iterator_for_pair =
+    std::input_iterator<f_iter> &&
+    std::same_as<typename std::iterator_traits<f_iter>::value_type, std::pair<tkey, tval>>;
+
+#endif
