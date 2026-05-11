@@ -19,13 +19,8 @@ struct ColumnMetadata {
     uint32_t default_string_id; // Added support for string defaults
 };
 
-struct pos_t {
-    uint32_t page_id;
-    uint32_t offset;
-
-    bool is_valid() const { return page_id != 0 || offset != 0; }
-    static pos_t invalid() { return {0, 0}; }
-};
+// pos_t определяется в record.h, здесь только forward declaration
+struct pos_t;
 
 struct TableHeader {
     uint32_t magic_number;    // Маркер файла СУБД (например, 0x44424D53)

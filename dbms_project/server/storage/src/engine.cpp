@@ -1545,46 +1545,6 @@ std::vector<RID> Engine::execute_indexed_select(const std::string& table_name, c
     return result;
 }
 
-std::vector<Record> Engine::execute_full_scan(const std::string& table_name, const ConditionNode* where_clause) {
-    std::vector<Record> result;
-
-    if (current_db.empty()) {
-        return result;
-    }
-
-    fs::path db_dir = fs::path(root_path) / current_db;
-    auto h = load_metadata_checked((db_dir / (table_name + ".meta")).string());
-    auto schema = get_table_schema(table_name);
-    Pager tbl_p((db_dir / (table_name + ".tbl")).string());
-
-    for (uint32_t i = 0; i <= h.last_data_page; ++i) {
-        std::vector<char> buf(PAGE_SIZE, 0);
-        tbl_p.read_page(i, buf.data());
-
-        uint32_t end_off = *reinterpret_cast<uint32_t*>(buf.data());
-        if (end_off <= kPageHeaderSize || end_off > PAGE_SIZE) continue;
-
-        size_t off = kPageHeaderSize;
-        while (off < end_off) {
-            if (off + sizeof(RecordHeader) > end_off) break;
-            auto* rh = reinterpret_cast<RecordHeader*>(buf.data() + off);
-            if (!is_live_record_layout(off, end_off, rh)) break;
-
-            size_t data_off = off + sizeof(RecordHeader);
-            if (!rh->is_deleted) {
-                auto row = RowDeserializer::deserialize(schema, buf.data(), data_off, string_pool.get());
-                if (!where_clause || ConditionEvaluator::evaluate(row, where_clause)) {
-                    result.push_back(row);
-                }
-            }
-
-            off += sizeof(RecordHeader) + rh->record_size;
-        }
-    }
-
-    return result;
-}
-
 std::string Engine::select_full_scan(
     const fs::path& db_dir, const QueryPlan& plan, const Schema& schema, const TableHeader& h) {
     json res = json::array();
@@ -1626,9 +1586,9 @@ std::string Engine::select_with_aggregates(const fs::path& db_dir, const QueryPl
 
     for (size_t i = 0; i < plan.select_targets.size(); ++i) {
         const auto& col = plan.select_targets[i];
-        if (col.aggregate != AggregateType::NONE) {
+        if (col.aggregate != ::AggregateType::NONE) {
             agg_results.emplace_back();
-            agg_results.back().reset(col.aggregate);
+            agg_results.back().reset(static_cast<dbms::AggregateType>(col.aggregate));
 
             // Находим индекс колонки в схеме
             int col_idx = -1;
@@ -1731,12 +1691,12 @@ std::string Engine::select_with_aggregates(const fs::path& db_dir, const QueryPl
     for (size_t i = 0; i < plan.select_targets.size(); ++i) {
         const auto& col = plan.select_targets[i];
         std::string output_name = col.alias.empty()
-                                      ? (col.aggregate != AggregateType::NONE
-                                                ? aggregate_type_to_string(col.aggregate) + "(" + col.column_name + ")"
+                                      ? (col.aggregate != ::AggregateType::NONE
+                                                ? aggregate_type_to_string(static_cast<dbms::AggregateType>(col.aggregate)) + "(" + col.column_name + ")"
                                                 : col.column_name)
                                       : col.alias;
 
-        if (col.aggregate != AggregateType::NONE) {
+        if (col.aggregate != ::AggregateType::NONE) {
             // Находим соответствующий результат агрегации
             int agg_idx = -1;
             for (size_t j = 0; j < agg_results.size(); ++j) {
