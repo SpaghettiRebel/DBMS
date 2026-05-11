@@ -296,7 +296,7 @@ PageHeader BinaryFileManager::readPageHeader(uint32_t page_id) {
         throw std::out_of_range("Page does not exist: " + std::to_string(page_id));
     }
     
-    std::vector<char> buffer(PageHeader::SIZE, 0);
+    std::vector<char> buffer(PAGE_SIZE, 0);
     pager_->read_page(page_id, buffer.data());
     
     return *reinterpret_cast<PageHeader*>(buffer.data());
@@ -367,7 +367,7 @@ PageType BinaryFileManager::getPageType(uint32_t page_id) const {
         return PageType::FREE;
     }
     
-    std::vector<char> buffer(PageHeader::SIZE, 0);
+    std::vector<char> buffer(PAGE_SIZE, 0);
     try {
         pager_->read_page(page_id, buffer.data());
         auto* header = reinterpret_cast<PageHeader*>(buffer.data());
