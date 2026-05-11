@@ -10,8 +10,9 @@
 #include <mutex>
 #include <unordered_map>
 
-// Forward declaration
-class StorageEngine;
+// Forward declaration - Engine is the actual storage engine class
+class Engine;
+using StorageEngine = Engine;  // Alias for compatibility
 
 /**
  * @brief Протокол сообщений между клиентом/балансировщиком и Storage-узлом

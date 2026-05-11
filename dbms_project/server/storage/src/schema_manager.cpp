@@ -189,10 +189,17 @@ void SchemaManager::drop_table(const std::string& db_name, const std::string& ta
 }
 
 bool SchemaManager::check_type(const Value& value, DataType expected_type) {
-    if (value.type == DataType::NULL_TYPE) {
+    if (value.is_null) {
         return true; // NULL допустим для любого типа (проверка NOT_NULL отдельно)
     }
-    return value.type == expected_type;
+    
+    // Проверка типа на основе variant
+    if (expected_type == DataType::INT) {
+        return std::holds_alternative<int>(value.data);
+    } else if (expected_type == DataType::STRING) {
+        return std::holds_alternative<std::string>(value.data);
+    }
+    return false;
 }
 
 bool SchemaManager::validate_record(const std::string& db_name, const std::string& table_name,
@@ -211,16 +218,19 @@ bool SchemaManager::validate_record(const std::string& db_name, const std::strin
         const auto& val = values[i];
         
         // Проверка NOT_NULL
-        if (col.not_null && val.type == DataType::NULL_TYPE) {
+        if (col.is_not_null && val.is_null) {
             error_msg = "Column '" + col.name + "' cannot be NULL";
             return false;
         }
         
         // Проверка типа
-        if (val.type != DataType::NULL_TYPE && !check_type(val, col.type)) {
+        if (!val.is_null && !check_type(val, col.type)) {
+            std::string actual_type = val.is_null ? "NULL" : 
+                                     (std::holds_alternative<int>(val.data) ? "INT" : "STRING");
+            std::string expected_type_str = col.type == DataType::INT ? "INT" : "STRING";
             error_msg = "Type mismatch for column '" + col.name + 
-                        "'. Expected " + (col.type == DataType::INT ? "INT" : "STRING") +
-                        ", got " + (val.type == DataType::INT ? "INT" : "STRING");
+                        "'. Expected " + expected_type_str +
+                        ", got " + actual_type;
             return false;
         }
     }
@@ -234,7 +244,7 @@ std::vector<std::string> SchemaManager::get_indexed_columns(const std::string& d
     std::vector<std::string> indexed;
     
     for (const auto& col : schema) {
-        if (col.indexed) {
+        if (col.is_indexed) {
             indexed.push_back(col.name);
         }
     }

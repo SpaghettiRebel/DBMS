@@ -261,3 +261,4 @@ BP_tree<tkey, tvalue, t, compare>::BP_tree(
 // Явная инстанциация для распространенных типов
 template class BP_tree<int, uint64_t, 5, std::less<int>>;
 template class BP_tree<std::string, uint64_t, 5, std::less<std::string>>;
+template class BP_tree<int, pos_t, 5, std::less<int>>;

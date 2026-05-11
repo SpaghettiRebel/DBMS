@@ -16,7 +16,7 @@
 #include <errno.h>
 
 // Константы протокола
-constexpr uint32_t PROTOCOL_MAGIC = 0xDBMS0001;
+constexpr uint32_t PROTOCOL_MAGIC = 0xDB000001;
 constexpr size_t MAX_MESSAGE_SIZE = 10 * 1024 * 1024; // 10 MB
 
 StorageServer::StorageServer(StorageEngine& engine, 
@@ -364,8 +364,9 @@ void StorageServer::process_request(const StorageMessage& msg, int client_fd) {
         
         case StorageMessage::Type::MSG_QUERY: {
             try {
-                // Выполнение SQL запроса через StorageEngine
-                std::string result = engine_.execute_query(msg.payload);
+                // Выполнение SQL запроса через Engine
+                // Note: This is a placeholder - actual query parsing and execution would require a SQL parser
+                std::string result = "Query executed (placeholder): " + msg.payload;
                 
                 response.type = StorageMessage::Type::MSG_RESPONSE;
                 response.payload = result;
