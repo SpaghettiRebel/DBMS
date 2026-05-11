@@ -7,6 +7,7 @@
 enum class JournalOp { INSERT, UPDATE, DELETE };
 
 #include "table_metadata.h"
+#include "record.h"
 
 struct JournalEntry {
     JournalOp op;

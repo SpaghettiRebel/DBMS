@@ -9,6 +9,7 @@
 #include <unordered_map>
 #include "../shared/QueryPlan.h"
 #include "table_metadata.h"
+#include "record.h"
 
 // ============================================================================
 // Write-Ahead Logging (WAL) Manager
