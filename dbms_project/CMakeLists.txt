@@ -6,7 +6,7 @@ set(CMAKE_CXX_STANDARD_REQUIRED ON)
 set(CMAKE_EXPORT_COMPILE_COMMANDS ON)
 
 # Флаги компиляции
-set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -Wall -Wextra -O2 -fconcepts")
+set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -Wall -Wextra -O2 -fconcepts -Wno-unused-parameter -Wno-unused-variable -Wno-unused-but-set-variable")
 set(CMAKE_CXX_FLAGS_DEBUG "-g -DDEBUG")
 
 # Исходники Storage Engine
