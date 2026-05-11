@@ -261,8 +261,7 @@ bool build_insert_values(const QueryPlan& plan, const std::vector<ColumnDef>& sc
             if (plan.target_columns[j] == schema[i].name) {
                 json scalar_value;
                 if (!value_to_json_scalar(plan.values[j], scalar_value) ||
-                    !json_to_storage_value(scalar_value, schema[i].type == DataType::INT,
-                        out_values[i], pool, true)) {
+                    !json_to_storage_value(scalar_value, schema[i].type == DataType::INT, out_values[i], pool, true)) {
                     throw std::runtime_error("Type mismatch in column: " + schema[i].name);
                 }
                 provided = true;
@@ -1351,8 +1350,7 @@ void Engine::revert(const std::string& table_name, const std::string& timestamp)
                 if (rh->is_deleted) continue;
 
                 size_t offset_temp = e.record_pos.offset + sizeof(RecordHeader);
-                auto row = RowDeserializer::deserialize(
-                    schema, buf.data(), offset_temp, string_pool.get());
+                auto row = RowDeserializer::deserialize(schema, buf.data(), offset_temp, string_pool.get());
 
                 for (size_t c = 0; c < h.column_count; ++c) {
                     if (!h.columns[c].is_indexed) continue;
@@ -1406,8 +1404,8 @@ void Engine::revert(const std::string& table_name, const std::string& timestamp)
 
                 if (e.new_data.size() == e.old_data.size()) {
                     size_t offset_temp = e.record_pos.offset + sizeof(RecordHeader);
-                    auto current_row = RowDeserializer::deserialize(
-                        schema, old_page.data(), offset_temp, string_pool.get());
+                    auto current_row =
+                        RowDeserializer::deserialize(schema, old_page.data(), offset_temp, string_pool.get());
                     auto old_row = payload_to_json_row(e.old_data, schema, string_pool.get());
 
                     for (size_t c = 0; c < h.column_count; ++c) {
@@ -1508,29 +1506,259 @@ std::vector<ColumnDef> Engine::get_table_schema(const std::string& table_name) {
 }
 // Реализация методов оптимизированного выполнения запросов
 
-std::vector<RID> Engine::execute_indexed_select(const std::string& /*table_name*/, const ExecutionPlan& plan) {
+namespace {
+// Вспомогательная функция для преобразования Value в ключ для B+ дерева
+bool value_to_index_key(const Value& v, bool is_int_type, int& out_key, StringPool* pool) {
+    if (v.is_null) return false;
+
+    if (is_int_type) {
+        if (!std::holds_alternative<int>(v.data)) return false;
+        out_key = std::get<int>(v.data);
+        return true;
+    }
+
+    // Для строковых типов
+    if (std::holds_alternative<int>(v.data)) {
+        out_key = std::get<int>(v.data);  // Уже ID строки
+        return true;
+    }
+
+    if (std::holds_alternative<std::string>(v.data)) {
+        auto id = pool->get_id_if_exists(std::get<std::string>(v.data));
+        if (!id.has_value()) return false;
+        out_key = static_cast<int>(*id);
+        return true;
+    }
+
+    return false;
+}
+}  // namespace
+
+std::vector<RID> Engine::execute_indexed_select(const std::string& table_name, const ExecutionPlan& plan) {
     std::vector<RID> result;
 
     if (plan.index_path.empty()) {
         return result;
     }
 
-    // Открываем B+-дерево индекса
-    Pager idx_p(plan.index_path);
+    // Определяем тип колонки индекса из схемы таблицы
+    Schema schema = get_table_schema(table_name);
+    DataType indexed_col_type = DataType::INT;
+    for (const auto& col : schema) {
+        if (col.name == plan.indexed_column) {
+            indexed_col_type = col.type;
+            break;
+        }
+    }
 
-    // Для простоты используем старый API BP_tree, в будущем нужно мигрировать на новый BPlusTree
-    // Здесь должна быть логика работы с новым BPlusTree<Value, RID>
-    // Пока используем заглушку, которая будет заменена при полной интеграции
+    bool is_int_type = (indexed_col_type == DataType::INT);
 
-    if (plan.predicate_type == PredicateType::EQUALS) {
-        // Точечный поиск
-        // В реальной реализации: tree.find(plan.search_key, rid)
-        // Здесь нужна адаптация типов Value -> int/string
-        // Заглушка для демонстрации архитектуры
-    } else if (plan.predicate_type == PredicateType::BETWEEN || plan.predicate_type == PredicateType::GREATER ||
-               plan.predicate_type == PredicateType::LESS) {
-        // Диапазонное сканирование
-        // В реальной реализации: tree.range_scan(low, high, callback)
+    // Открываем B+-дерево индекса в зависимости от типа ключа
+    // Для int ключей
+    std::unique_ptr<BP_tree<int, pos_t>> int_index_tree;
+    // Для string ключей (храним ID строки из string_pool как ключ)
+    std::unique_ptr<BP_tree<int, pos_t>> str_index_tree;
+
+    try {
+        Pager* idx_p = new Pager(plan.index_path);
+        uint32_t root_page_id = 0;
+
+        // Читаем root page ID из заголовка файла индекса (первый uint32_t)
+        std::vector<char> header_buf(sizeof(uint32_t));
+        idx_p->read_page(0, header_buf.data());
+        root_page_id = *reinterpret_cast<uint32_t*>(header_buf.data());
+
+        if (root_page_id == 0) {
+            // Индекс пуст, создаем новое дерево
+            root_page_id = idx_p->allocate_page();
+            // Записываем root page ID обратно в заголовок
+            *reinterpret_cast<uint32_t*>(header_buf.data()) = root_page_id;
+            idx_p->write_page(0, header_buf.data());
+        }
+
+        if (is_int_type) {
+            int_index_tree = std::make_unique<BP_tree<int, pos_t>>(idx_p, root_page_id);
+        } else {
+            str_index_tree = std::make_unique<BP_tree<int, pos_t>>(idx_p, root_page_id);
+        }
+
+    } catch (const std::exception& e) {
+        throw std::runtime_error("Failed to open index tree: " + std::string(e.what()));
+    }
+
+    // Вспомогательная функция для сбора RID из диапазона
+    auto collect_range = [&](auto& tree, auto start_it, auto end_it) {
+        while (start_it != end_it && start_it != tree.end()) {
+            result.push_back(start_it->second);
+            ++start_it;
+        }
+    };
+
+    if (is_int_type && int_index_tree) {
+        auto& tree = *int_index_tree;
+
+        switch (plan.predicate_type) {
+            case PredicateType::EQUALS: {
+                // Точечный поиск по индексу
+                int search_key = 0;
+                if (value_to_index_key(plan.search_key, true, search_key, string_pool.get())) {
+                    auto it = tree.find(search_key);
+                    if (it != tree.end()) {
+                        result.push_back(it->second);
+                    }
+                }
+                break;
+            }
+
+            case PredicateType::GREATER:
+            case PredicateType::GREATER_EQ: {
+                int lower_key = 0;
+                if (value_to_index_key(plan.range_start, true, lower_key, string_pool.get())) {
+                    auto it = tree.lower_bound(lower_key);
+
+                    if (plan.predicate_type == PredicateType::GREATER) {
+                        while (it != tree.end() && it->first == lower_key) {
+                            ++it;
+                        }
+                    }
+
+                    collect_range(tree, it, tree.end());
+                }
+                break;
+            }
+
+            case PredicateType::LESS:
+            case PredicateType::LESS_EQ: {
+                int upper_key = 0;
+                if (value_to_index_key(plan.range_end, true, upper_key, string_pool.get())) {
+                    auto it = tree.begin();
+                    auto end_it = tree.lower_bound(upper_key);
+
+                    if (plan.predicate_type == PredicateType::LESS_EQ) {
+                        // Включаем ключи равные upper_key
+                        auto check_it = end_it;
+                        while (check_it != tree.end() && check_it->first == upper_key) {
+                            result.push_back(check_it->second);
+                            ++check_it;
+                        }
+                    }
+
+                    collect_range(tree, it, end_it);
+                }
+                break;
+            }
+
+            case PredicateType::BETWEEN: {
+                int lower_key = 0;
+                int upper_key = 0;
+
+                if (value_to_index_key(plan.range_start, true, lower_key, string_pool.get()) &&
+                    value_to_index_key(plan.range_end, true, upper_key, string_pool.get())) {
+                    auto start_it = tree.lower_bound(lower_key);
+                    auto end_it = tree.lower_bound(upper_key);
+
+                    collect_range(tree, start_it, end_it);
+                }
+                break;
+            }
+
+            case PredicateType::NOT_EQUALS: {
+                int exclude_key = 0;
+                if (value_to_index_key(plan.search_key, true, exclude_key, string_pool.get())) {
+                    for (auto it = tree.begin(); it != tree.end(); ++it) {
+                        if (it->first != exclude_key) {
+                            result.push_back(it->second);
+                        }
+                    }
+                }
+                break;
+            }
+
+            default:
+                break;
+        }
+
+    } else if (!is_int_type && str_index_tree) {
+        auto& tree = *str_index_tree;
+
+        switch (plan.predicate_type) {
+            case PredicateType::EQUALS: {
+                int search_key = 0;
+                if (value_to_index_key(plan.search_key, false, search_key, string_pool.get())) {
+                    auto it = tree.find(search_key);
+                    if (it != tree.end()) {
+                        result.push_back(it->second);
+                    }
+                }
+                break;
+            }
+
+            case PredicateType::GREATER:
+            case PredicateType::GREATER_EQ: {
+                int lower_key = 0;
+                if (value_to_index_key(plan.range_start, false, lower_key, string_pool.get())) {
+                    auto it = tree.lower_bound(lower_key);
+
+                    if (plan.predicate_type == PredicateType::GREATER) {
+                        while (it != tree.end() && it->first == lower_key) {
+                            ++it;
+                        }
+                    }
+
+                    collect_range(tree, it, tree.end());
+                }
+                break;
+            }
+
+            case PredicateType::LESS:
+            case PredicateType::LESS_EQ: {
+                int upper_key = 0;
+                if (value_to_index_key(plan.range_end, false, upper_key, string_pool.get())) {
+                    auto it = tree.begin();
+                    auto end_it = tree.lower_bound(upper_key);
+
+                    if (plan.predicate_type == PredicateType::LESS_EQ) {
+                        auto check_it = end_it;
+                        while (check_it != tree.end() && check_it->first == upper_key) {
+                            result.push_back(check_it->second);
+                            ++check_it;
+                        }
+                    }
+
+                    collect_range(tree, it, end_it);
+                }
+                break;
+            }
+
+            case PredicateType::BETWEEN: {
+                int lower_key = 0;
+                int upper_key = 0;
+
+                if (value_to_index_key(plan.range_start, false, lower_key, string_pool.get()) &&
+                    value_to_index_key(plan.range_end, false, upper_key, string_pool.get())) {
+                    auto start_it = tree.lower_bound(lower_key);
+                    auto end_it = tree.lower_bound(upper_key);
+
+                    collect_range(tree, start_it, end_it);
+                }
+                break;
+            }
+
+            case PredicateType::NOT_EQUALS: {
+                int exclude_key = 0;
+                if (value_to_index_key(plan.search_key, false, exclude_key, string_pool.get())) {
+                    for (auto it = tree.begin(); it != tree.end(); ++it) {
+                        if (it->first != exclude_key) {
+                            result.push_back(it->second);
+                        }
+                    }
+                }
+                break;
+            }
+
+            default:
+                break;
+        }
     }
 
     return result;
@@ -1681,17 +1909,19 @@ std::string Engine::select_with_aggregates(const fs::path& db_dir, const QueryPl
     json result_row;
     for (size_t i = 0; i < plan.select_targets.size(); ++i) {
         const auto& col = plan.select_targets[i];
-        std::string output_name = col.alias.empty()
-                                      ? (col.aggregate != AggregateType::NONE
-                                                ? aggregate_type_to_string(static_cast<dbms::AggregateType>(col.aggregate)) + "(" + col.column_name + ")"
-                                                : col.column_name)
-                                      : col.alias;
+        std::string output_name =
+            col.alias.empty() ? (col.aggregate != AggregateType::NONE
+                                        ? aggregate_type_to_string(static_cast<dbms::AggregateType>(col.aggregate)) +
+                                              "(" + col.column_name + ")"
+                                        : col.column_name)
+                              : col.alias;
 
         if (col.aggregate != AggregateType::NONE) {
             // Находим соответствующий результат агрегации
             int agg_idx = -1;
             for (size_t j = 0; j < agg_results.size(); ++j) {
-                if (plan.select_targets[j].column_name == col.column_name && plan.select_targets[j].aggregate == col.aggregate) {
+                if (plan.select_targets[j].column_name == col.column_name &&
+                    plan.select_targets[j].aggregate == col.aggregate) {
                     agg_idx = static_cast<int>(j);
                     break;
                 }
