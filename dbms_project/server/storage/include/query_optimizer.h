@@ -5,8 +5,12 @@
 #include <memory>
 #include <variant>
 #include "bplus_tree.h"
-#include "schema_manager.h"
-#include "record.h"
+#include "../shared/QueryPlan.h"
+
+// Используем типы из QueryPlan.h (они в глобальном namespace)
+using Value = ::Value;
+using ConditionNode = ::ConditionNode;
+using Schema = std::vector<::ColumnDef>;
 
 // Типы предикатов, которые мы умеем оптимизировать
 enum class PredicateType {

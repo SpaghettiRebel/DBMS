@@ -264,7 +264,9 @@ bool build_insert_values(const QueryPlan& plan, const std::vector<ColumnDef>& sc
         bool provided = false;
         for (size_t j = 0; j < plan.target_columns.size(); ++j) {
             if (plan.target_columns[j] == schema[i].name) {
-                if (!json_to_storage_value(value_to_json_scalar(plan.values[j]), schema[i].type == DataType::INT,
+                json scalar_value;
+                if (!value_to_json_scalar(plan.values[j], scalar_value) ||
+                    !json_to_storage_value(scalar_value, schema[i].type == DataType::INT,
                         out_values[i], pool, true)) {
                     throw std::runtime_error("Type mismatch in column: " + schema[i].name);
                 }
@@ -910,8 +912,8 @@ std::string Engine::select_records(const QueryPlan& plan) {
 
     // Проверяем наличие агрегатных функций
     bool has_aggregates = false;
-    for (const auto& col : plan.columns) {
-        if (col.agg_type != AggregateType::NONE) {
+    for (const auto& col : plan.select_targets) {
+        if (col.aggregate != AggregateType::NONE) {
             has_aggregates = true;
             break;
         }
@@ -1123,7 +1125,9 @@ void Engine::update_records(const QueryPlan& plan) {
 
                         json updated_row = row;
                         for (size_t i = 0; i < plan.target_columns.size(); ++i) {
-                            updated_row[plan.target_columns[i]] = value_to_json_scalar(plan.values[i]);
+                            json val;
+                            value_to_json_scalar(plan.values[i], val);
+                            updated_row[plan.target_columns[i]] = val;
                         }
 
                         std::vector<Value> new_values;
@@ -1355,8 +1359,9 @@ void Engine::revert(const std::string& table_name, const std::string& timestamp)
                 auto* rh = reinterpret_cast<RecordHeader*>(buf.data() + e.record_pos.offset);
                 if (rh->is_deleted) continue;
 
+                size_t offset_temp = e.record_pos.offset + sizeof(RecordHeader);
                 auto row = RowDeserializer::deserialize(
-                    schema, buf.data(), e.record_pos.offset + sizeof(RecordHeader), string_pool.get());
+                    schema, buf.data(), offset_temp, string_pool.get());
 
                 for (size_t c = 0; c < h.column_count; ++c) {
                     if (!h.columns[c].is_indexed) continue;
@@ -1409,8 +1414,9 @@ void Engine::revert(const std::string& table_name, const std::string& timestamp)
                 auto* old_rh = reinterpret_cast<RecordHeader*>(old_page.data() + e.record_pos.offset);
 
                 if (e.new_data.size() == e.old_data.size()) {
+                    size_t offset_temp = e.record_pos.offset + sizeof(RecordHeader);
                     auto current_row = RowDeserializer::deserialize(
-                        schema, old_page.data(), e.record_pos.offset + sizeof(RecordHeader), string_pool.get());
+                        schema, old_page.data(), offset_temp, string_pool.get());
                     auto old_row = payload_to_json_row(e.old_data, schema, string_pool.get());
 
                     for (size_t c = 0; c < h.column_count; ++c) {
@@ -1618,11 +1624,11 @@ std::string Engine::select_with_aggregates(const fs::path& db_dir, const QueryPl
     std::vector<AggregateResult> agg_results;
     std::vector<size_t> agg_column_indices;  // Индексы колонок в схеме для агрегации
 
-    for (size_t i = 0; i < plan.columns.size(); ++i) {
-        const auto& col = plan.columns[i];
-        if (col.agg_type != AggregateType::NONE) {
+    for (size_t i = 0; i < plan.select_targets.size(); ++i) {
+        const auto& col = plan.select_targets[i];
+        if (col.aggregate != AggregateType::NONE) {
             agg_results.emplace_back();
-            agg_results.back().reset(col.agg_type);
+            agg_results.back().reset(col.aggregate);
 
             // Находим индекс колонки в схеме
             int col_idx = -1;
@@ -1722,19 +1728,19 @@ std::string Engine::select_with_aggregates(const fs::path& db_dir, const QueryPl
 
     // Формируем результат
     json result_row;
-    for (size_t i = 0; i < plan.columns.size(); ++i) {
-        const auto& col = plan.columns[i];
+    for (size_t i = 0; i < plan.select_targets.size(); ++i) {
+        const auto& col = plan.select_targets[i];
         std::string output_name = col.alias.empty()
-                                      ? (col.agg_type != AggregateType::NONE
-                                                ? aggregate_type_to_string(col.agg_type) + "(" + col.column_name + ")"
+                                      ? (col.aggregate != AggregateType::NONE
+                                                ? aggregate_type_to_string(col.aggregate) + "(" + col.column_name + ")"
                                                 : col.column_name)
                                       : col.alias;
 
-        if (col.agg_type != AggregateType::NONE) {
+        if (col.aggregate != AggregateType::NONE) {
             // Находим соответствующий результат агрегации
             int agg_idx = -1;
             for (size_t j = 0; j < agg_results.size(); ++j) {
-                if (plan.columns[j].column_name == col.column_name && plan.columns[j].agg_type == col.agg_type) {
+                if (plan.select_targets[j].column_name == col.column_name && plan.select_targets[j].aggregate == col.aggregate) {
                     agg_idx = static_cast<int>(j);
                     break;
                 }

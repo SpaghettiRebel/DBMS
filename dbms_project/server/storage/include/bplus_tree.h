@@ -132,6 +132,8 @@ private:
     void serialize_node(std::vector<char>& out, const bptree_node_base* node) const;
     bptree_node_base* deserialize_node(const char*& cur, const char* end);
     void collect_leaves(bptree_node_base* node, std::vector<bptree_node_term*>& leaves) const noexcept;
+
+public:
     void persist_to_disk();
     void load_from_disk();
 

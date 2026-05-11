@@ -152,7 +152,7 @@ bool AsyncRequestQueue::cancel(const std::string& request_guid) {
 }
 
 size_t AsyncRequestQueue::queue_size() const {
-    std::lock_guard<std::mutex> lock(queue_mutex_);
+    std::lock_guard<std::mutex> lock(const_cast<std::mutex&>(queue_mutex_));
     return request_queue_.size();
 }
 

@@ -105,3 +105,13 @@ struct AggregateResult {
 };
 
 } // namespace dbms
+
+// Helper function to convert AggregateType to string
+inline std::string aggregate_type_to_string(dbms::AggregateType type) {
+    switch (type) {
+        case dbms::AggregateType::SUM: return "SUM";
+        case dbms::AggregateType::COUNT: return "COUNT";
+        case dbms::AggregateType::AVG: return "AVG";
+        default: return "NONE";
+    }
+}

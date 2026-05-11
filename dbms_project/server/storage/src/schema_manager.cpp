@@ -39,22 +39,28 @@ void SchemaManager::save_schema(const std::string& db_name, const std::string& t
         file.write(col.name.c_str(), name_len);
         
         file.write(reinterpret_cast<const char*>(&col.type), sizeof(col.type));
-        file.write(reinterpret_cast<const char*>(&col.not_null), sizeof(col.not_null));
-        file.write(reinterpret_cast<const char*>(&col.indexed), sizeof(col.indexed));
-        file.write(reinterpret_cast<const char*>(&col.has_default), sizeof(col.has_default));
+        file.write(reinterpret_cast<const char*>(&col.is_not_null), sizeof(col.is_not_null));
+        file.write(reinterpret_cast<const char*>(&col.is_indexed), sizeof(col.is_indexed));
         
-        if (col.has_default) {
+        // Запись флага наличия default_value
+        bool has_default = col.default_value.has_value();
+        file.write(reinterpret_cast<const char*>(&has_default), sizeof(has_default));
+        
+        if (has_default) {
             // Сериализация значения по умолчанию
-            file.write(reinterpret_cast<const char*>(&col.default_value.type), 
-                      sizeof(col.default_value.type));
-            if (col.default_value.type == DataType::INT) {
-                int64_t val = col.default_value.as_int();
-                file.write(reinterpret_cast<const char*>(&val), sizeof(val));
-            } else if (col.default_value.type == DataType::STRING) {
-                const std::string& str_val = col.default_value.as_string();
-                uint32_t str_len = static_cast<uint32_t>(str_val.length());
-                file.write(reinterpret_cast<const char*>(&str_len), sizeof(str_len));
-                file.write(str_val.c_str(), str_len);
+            const Value& def_val = col.default_value.value();
+            bool is_null = def_val.is_null;
+            file.write(reinterpret_cast<const char*>(&is_null), sizeof(is_null));
+            if (!is_null) {
+                if (std::holds_alternative<int>(def_val.data)) {
+                    int64_t val = std::get<int>(def_val.data);
+                    file.write(reinterpret_cast<const char*>(&val), sizeof(val));
+                } else if (std::holds_alternative<std::string>(def_val.data)) {
+                    const std::string& str_val = std::get<std::string>(def_val.data);
+                    uint32_t str_len = static_cast<uint32_t>(str_val.length());
+                    file.write(reinterpret_cast<const char*>(&str_len), sizeof(str_len));
+                    file.write(str_val.c_str(), str_len);
+                }
             }
         }
     }
@@ -87,24 +93,32 @@ void SchemaManager::load_schema(const std::string& db_name, const std::string& t
         col.name = name;
         
         file.read(reinterpret_cast<char*>(&col.type), sizeof(col.type));
-        file.read(reinterpret_cast<char*>(&col.not_null), sizeof(col.not_null));
-        file.read(reinterpret_cast<char*>(&col.indexed), sizeof(col.indexed));
-        file.read(reinterpret_cast<char*>(&col.has_default), sizeof(col.has_default));
+        file.read(reinterpret_cast<char*>(&col.is_not_null), sizeof(col.is_not_null));
+        file.read(reinterpret_cast<char*>(&col.is_indexed), sizeof(col.is_indexed));
         
-        if (col.has_default) {
-            DataType val_type;
-            file.read(reinterpret_cast<char*>(&val_type), sizeof(val_type));
-            
-            if (val_type == DataType::INT) {
-                int64_t val;
-                file.read(reinterpret_cast<char*>(&val), sizeof(val));
-                col.default_value = Value(val);
-            } else if (val_type == DataType::STRING) {
-                uint32_t str_len;
-                file.read(reinterpret_cast<char*>(&str_len), sizeof(str_len));
-                std::string str_val(str_len, '\0');
-                file.read(&str_val[0], str_len);
-                col.default_value = Value(str_val);
+        bool has_default;
+        file.read(reinterpret_cast<char*>(&has_default), sizeof(has_default));
+        
+        if (has_default) {
+            bool is_null;
+            file.read(reinterpret_cast<char*>(&is_null), sizeof(is_null));
+            if (!is_null) {
+                if (std::holds_alternative<int>(col.default_value.emplace().data)) {
+                    int64_t val;
+                    file.read(reinterpret_cast<char*>(&val), sizeof(val));
+                    col.default_value->data = static_cast<int>(val);
+                } else {
+                    col.default_value.emplace();
+                    col.default_value->is_null = false;
+                    uint32_t str_len;
+                    file.read(reinterpret_cast<char*>(&str_len), sizeof(str_len));
+                    std::string str_val(str_len, '\0');
+                    file.read(&str_val[0], str_len);
+                    col.default_value->data = str_val;
+                }
+            } else {
+                col.default_value.emplace();
+                col.default_value->is_null = true;
             }
         }
         

@@ -2,11 +2,7 @@
 #include <stdexcept>
 #include <cmath>
 
-namespace dbms {
-
-// Реализация методов AggregateResult вынесена в заголовок для простоты (inline)
-// Этот файл может использоваться для дополнительных утилитных функций агрегации
-
+// Функция для конвертации AggregateType в строку
 std::string aggregate_type_to_string(AggregateType type) {
     switch (type) {
         case AggregateType::COUNT: return "COUNT";
@@ -32,5 +28,3 @@ AggregateType parse_aggregate_type(const std::string& func_name) {
     
     return AggregateType::NONE;
 }
-
-} // namespace dbms
