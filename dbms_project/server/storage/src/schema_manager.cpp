@@ -21,7 +21,12 @@ void SchemaManager::save_schema(const std::string& db_name, const std::string& t
     
     // Создаем директорию если не существует
     std::string dir_path = root_path_ + "/" + db_name;
-    mkdir(dir_path.c_str(), 0755);
+
+    #ifdef _WIN32
+        mkdir(dir_path.c_str());
+    #else
+        mkdir(dir_path.c_str(), 0755);
+    #endif
     
     std::ofstream file(path, std::ios::binary);
     if (!file.is_open()) {

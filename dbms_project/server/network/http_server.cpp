@@ -6,6 +6,10 @@
 #include <string>
 #include <utility>
 
+#ifdef DELETE
+#undef DELETE
+#endif
+
 #if __has_include(<crow.h>)
 #include <crow.h>
 #elif __has_include(<crow/crow.h>)
@@ -139,24 +143,40 @@ json as_array_of_objects(json payload) {
     return wrapped;
 }
 
-}  
+}
 
 namespace dbms::network {
 
 int run_http_server(const std::string& data_root, const std::string& bind_host, std::uint16_t port,
     const std::string& jwt_secret) {
+
     crow::App<dbms::auth::JwtMiddleware> app;
     app.get_middleware<dbms::auth::JwtMiddleware>().set_secret(jwt_secret);
 
     Engine engine(data_root);
 
-    CROW_ROUTE(app, "/health").methods(crow::HTTPMethod::GET)([] {
+    CROW_ROUTE(app, "/health").methods(crow::HTTPMethod::Get)([] {
         json payload = json::array();
         payload.push_back({{"status", "ok"}});
         return json_response(200, payload);
     });
 
-    CROW_ROUTE(app, "/query").methods(crow::HTTPMethod::POST)([&engine](const crow::request& request) {
+    CROW_ROUTE(app, "/login").methods(crow::HTTPMethod::Post)([&jwt_secret](const crow::request& request) {
+        try {
+            const json body = json::parse(request.body);
+            if (body["login"] == "admin" && body["password"] == "admin") {
+                std::string token = dbms::auth::generate_jwt("admin_user", jwt_secret);
+                json response = json::array();
+                response.push_back({{"token", token}});
+                return json_response(200, response);
+            }
+            return json_response(401, json::array({{"error", "invalid_credentials"}}));
+        } catch (...) {
+            return json_response(400, json::array({{"error", "bad_request"}}));
+        }
+    });
+
+    CROW_ROUTE(app, "/query").methods(crow::HTTPMethod::Post)([&engine](const crow::request& request) {
         try {
             const json request_body = json::parse(request.body);
             if (!request_body.is_object() || !request_body.contains("query") || !request_body["query"].is_string()) {

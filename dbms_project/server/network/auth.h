@@ -3,6 +3,9 @@
 #include <chrono>
 #include <cstddef>
 #include <string>
+#ifdef DELETE
+#undef DELETE
+#endif
 
 #if __has_include(<crow.h>)
 #include <crow.h>

@@ -5,6 +5,10 @@
 #include <variant>
 #include <vector>
 
+#ifdef DELETE
+#undef DELETE
+#endif
+
 // Типы запросов, поддерживаемые СУБД [cite: 30, 36, 39]
 enum class QueryType {
     CREATE_DATABASE,

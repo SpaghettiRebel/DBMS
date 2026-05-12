@@ -2,67 +2,69 @@ cmake_minimum_required(VERSION 3.16)
 
 project(dbms_server LANGUAGES CXX)
 
-set(CMAKE_CXX_STANDARD 17)
+set(CMAKE_CXX_STANDARD 20)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
 set(CMAKE_CXX_EXTENSIONS OFF)
 
+# Определяем пути к корню и сторонним библиотекам
 set(DBMS_ROOT_DIR ${CMAKE_CURRENT_SOURCE_DIR}/..)
 set(THIRD_PARTY_DIR ${DBMS_ROOT_DIR}/third_party)
 
+# Список исходников ядра (код напарника)
 set(STORAGE_CORE_SOURCES
-    storage/src/engine.cpp
-    storage/src/file_manager.cpp
-    storage/src/binary_file_manager.cpp
-    storage/src/bplus_tree_persistence.cpp
-    storage/src/wal_manager.cpp
-    storage/src/journal.cpp
-    storage/src/string_pool.cpp
-    storage/src/query_optimizer.cpp
-    storage/src/schema_manager.cpp
-    storage/src/access_logger.cpp
+        storage/src/engine.cpp
+        storage/src/file_manager.cpp
+        storage/src/binary_file_manager.cpp
+        storage/src/bplus_tree_persistence.cpp
+        storage/src/wal_manager.cpp
+        storage/src/journal.cpp
+        storage/src/string_pool.cpp
+        storage/src/query_optimizer.cpp
+        storage/src/schema_manager.cpp
+        storage/src/access_logger.cpp
 )
 
+# Создаем статическую библиотеку ядра
 add_library(dbms_storage_core STATIC ${STORAGE_CORE_SOURCES})
 
+# Добавляем пути поиска заголовков для ядра (включая Boost)
 target_include_directories(dbms_storage_core
-    PUBLIC
+        PUBLIC
         ${CMAKE_CURRENT_SOURCE_DIR}/storage/include
         ${DBMS_ROOT_DIR}/shared
+        ${THIRD_PARTY_DIR}/boost
+        ${THIRD_PARTY_DIR}
 )
 
+# Основной исполняемый файл сервера
 add_executable(dbms_http_server
-    main.cpp
-    network/http_server.cpp
-    network/auth.cpp
+        main.cpp
+        network/http_server.cpp
+        network/auth.cpp
 )
 
+# Добавляем пути поиска заголовков для сервера (Crow и всё остальное)
 target_include_directories(dbms_http_server
-    PRIVATE
+        PRIVATE
         ${CMAKE_CURRENT_SOURCE_DIR}
         ${CMAKE_CURRENT_SOURCE_DIR}/network
         ${CMAKE_CURRENT_SOURCE_DIR}/storage/include
         ${DBMS_ROOT_DIR}/shared
-        ${THIRD_PARTY_DIR}
         ${THIRD_PARTY_DIR}/crow
-        ${THIRD_PARTY_DIR}/crow/include
-        ${THIRD_PARTY_DIR}/Crow
-        ${THIRD_PARTY_DIR}/Crow/include
+        ${THIRD_PARTY_DIR}/boost
 )
 
-if (EXISTS "${THIRD_PARTY_DIR}/crow/CMakeLists.txt")
-    add_subdirectory(${THIRD_PARTY_DIR}/crow ${CMAKE_CURRENT_BINARY_DIR}/crow_build)
-endif()
-
+# Поиск системных библиотек (потоки)
 find_package(Threads REQUIRED)
 
+# Линковка: соединяем сервер с ядром и системными библиотеками
 target_link_libraries(dbms_http_server
-    PRIVATE
+        PRIVATE
         dbms_storage_core
         Threads::Threads
 )
 
-if (TARGET Crow::Crow)
-    target_link_libraries(dbms_http_server PRIVATE Crow::Crow)
-elseif (TARGET crow)
-    target_link_libraries(dbms_http_server PRIVATE crow)
+# Если используешь MinGW на Windows, иногда нужна библиотека ws2_32 для работы сети
+if(WIN32)
+    target_link_libraries(dbms_http_server PRIVATE ws2_32 mswsock)
 endif()

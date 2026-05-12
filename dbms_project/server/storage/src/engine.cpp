@@ -41,7 +41,11 @@ std::string get_now_timestamp() {
     auto t = std::chrono::system_clock::to_time_t(now);
     auto ms = std::chrono::duration_cast<std::chrono::milliseconds>(now.time_since_epoch()) % 1000;
     std::tm bt{};
-    localtime_r(&t, &bt);
+    #ifdef _WIN32
+        localtime_s(&bt, &t);
+    #else
+        localtime_r(&t, &bt);
+    #endif
 
     std::ostringstream oss;
     oss << std::put_time(&bt, "%Y.%m.%d-%H:%M:%S") << '.' << std::setfill('0') << std::setw(3) << ms.count();
@@ -507,11 +511,11 @@ Engine::Engine(std::string root) : root_path(std::move(root)) {
     }
 
     // Инициализация StringPool для дедупликации строк
-    std::string pool_path = fs::path(root_path) / "string_pool.dat";
+    std::string pool_path = (fs::path(root_path) / "string_pool.dat").string();
     string_pool = std::make_unique<StringPool>(pool_path);
 
     // Инициализация WAL (Write-Ahead Log) для обеспечения целостности данных
-    std::string wal_path = fs::path(root_path) / "wal.dat";
+    std::string wal_path = (fs::path(root_path) / "wal.dat").string();
     wal = std::make_unique<WriteAheadLog>(wal_path);
 
     // Инициализация менеджера схем

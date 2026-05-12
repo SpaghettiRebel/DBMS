@@ -4,6 +4,10 @@
 #include <fstream>
 #include "../shared/QueryPlan.h"
 
+#ifdef DELETE
+#undef DELETE
+#endif
+
 enum class JournalOp { INSERT, UPDATE, DELETE };
 
 #include "table_metadata.h"
