@@ -121,7 +121,6 @@ crow::response json_response(int code, const json& payload) {
     response.code = code;
     response.set_header("Content-Type", "application/json");
     response.write(payload.dump());
-    response.end();
     return response;
 }
 
