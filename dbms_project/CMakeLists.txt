@@ -68,7 +68,7 @@ add_executable(storage_server server/storage/src/main_storage_server.cpp)
 target_link_libraries(storage_server storage_lib pthread)
 
 # Клиент
-add_executable(dbms_client client/main.cpp)
+add_subdirectory(client)
 # Если у клиента есть свой код, добавьте его здесь, пока заглушка
 
 # Тесты линкуются с библиотекой
