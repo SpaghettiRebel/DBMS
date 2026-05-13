@@ -8,16 +8,100 @@
 #include <chrono>
 #include <iomanip>
 
+#ifdef _WIN32
+#include <winsock2.h>
+#include <ws2tcpip.h>
+#else
 #include <sys/socket.h>
 #include <netinet/in.h>
 #include <arpa/inet.h>
 #include <unistd.h>
-#include <fcntl.h>
+#endif
 #include <errno.h>
 
 // Константы протокола
 constexpr uint32_t PROTOCOL_MAGIC = 0xDB000001;
 constexpr size_t MAX_MESSAGE_SIZE = 10 * 1024 * 1024; // 10 MB
+
+namespace {
+
+#ifdef _WIN32
+int get_socket_error_code() {
+    return WSAGetLastError();
+}
+
+std::string socket_error_message() {
+    return std::to_string(get_socket_error_code());
+}
+
+bool is_socket_interrupted() {
+    return get_socket_error_code() == WSAEINTR;
+}
+
+bool is_socket_would_block() {
+    const int code = get_socket_error_code();
+    return code == WSAEWOULDBLOCK || code == WSAEINPROGRESS;
+}
+
+bool is_socket_broken_pipe() {
+    const int code = get_socket_error_code();
+    return code == WSAECONNRESET || code == WSAENOTCONN || code == WSAESHUTDOWN;
+}
+
+int close_socket(int fd) {
+    return closesocket(static_cast<SOCKET>(fd));
+}
+
+int shutdown_socket(int fd) {
+    return shutdown(static_cast<SOCKET>(fd), SD_BOTH);
+}
+
+int socket_read(int fd, void* buffer, size_t len) {
+    return recv(static_cast<SOCKET>(fd), static_cast<char*>(buffer), static_cast<int>(len), 0);
+}
+
+int socket_send(int fd, const void* buffer, size_t len) {
+    return send(static_cast<SOCKET>(fd), static_cast<const char*>(buffer), static_cast<int>(len), 0);
+}
+#else
+int get_socket_error_code() {
+    return errno;
+}
+
+std::string socket_error_message() {
+    return std::string(strerror(errno));
+}
+
+bool is_socket_interrupted() {
+    return errno == EINTR;
+}
+
+bool is_socket_would_block() {
+    return errno == EAGAIN || errno == EWOULDBLOCK;
+}
+
+bool is_socket_broken_pipe() {
+    return errno == EPIPE;
+}
+
+int close_socket(int fd) {
+    return close(fd);
+}
+
+int shutdown_socket(int fd) {
+    return shutdown(fd, SHUT_RDWR);
+}
+
+int socket_read(int fd, void* buffer, size_t len) {
+    return static_cast<int>(read(fd, buffer, len));
+}
+
+int socket_send(int fd, const void* buffer, size_t len) {
+    return static_cast<int>(send(fd, buffer, len, MSG_NOSIGNAL));
+}
+#endif
+
+}
 
 StorageServer::StorageServer(StorageEngine& engine, 
                              const std::string& host,
@@ -45,18 +129,38 @@ bool StorageServer::start() {
         return false;
     }
 
+#ifdef _WIN32
+    WSADATA wsa_data;
+    if (WSAStartup(MAKEWORD(2, 2), &wsa_data) != 0) {
+        log_error("WSAStartup failed: " + socket_error_message());
+        return false;
+    }
+#endif
+
     // Создание сокета
     server_fd_ = socket(AF_INET, SOCK_STREAM, 0);
     if (server_fd_ < 0) {
-        log_error("Failed to create socket: " + std::string(strerror(errno)));
+        log_error("Failed to create socket: " + socket_error_message());
+#ifdef _WIN32
+        WSACleanup();
+#endif
         return false;
     }
 
     // Настройка сокета для повторного использования адреса
     int opt = 1;
-    if (setsockopt(server_fd_, SOL_SOCKET, SO_REUSEADDR, &opt, sizeof(opt)) < 0) {
-        log_error("Failed to set SO_REUSEADDR: " + std::string(strerror(errno)));
-        close(server_fd_);
+    if (setsockopt(server_fd_, SOL_SOCKET, SO_REUSEADDR,
+#ifdef _WIN32
+                   reinterpret_cast<const char*>(&opt),
+#else
+                   &opt,
+#endif
+                   sizeof(opt)) < 0) {
+        log_error("Failed to set SO_REUSEADDR: " + socket_error_message());
+        close_socket(server_fd_);
+#ifdef _WIN32
+        WSACleanup();
+#endif
         return false;
     }
 
@@ -68,21 +172,30 @@ bool StorageServer::start() {
     
     if (inet_pton(AF_INET, host_.c_str(), &address.sin_addr) <= 0) {
         log_error("Invalid address: " + host_);
-        close(server_fd_);
+        close_socket(server_fd_);
+#ifdef _WIN32
+        WSACleanup();
+#endif
         return false;
     }
 
     // Привязка к адресу
     if (bind(server_fd_, (struct sockaddr*)&address, sizeof(address)) < 0) {
-        log_error("Bind failed: " + std::string(strerror(errno)));
-        close(server_fd_);
+        log_error("Bind failed: " + socket_error_message());
+        close_socket(server_fd_);
+#ifdef _WIN32
+        WSACleanup();
+#endif
         return false;
     }
 
     // Начало прослушивания
     if (listen(server_fd_, max_connections_) < 0) {
-        log_error("Listen failed: " + std::string(strerror(errno)));
-        close(server_fd_);
+        log_error("Listen failed: " + socket_error_message());
+        close_socket(server_fd_);
+#ifdef _WIN32
+        WSACleanup();
+#endif
         return false;
     }
 
@@ -105,8 +218,8 @@ void StorageServer::stop(uint32_t timeout_ms) {
 
     // Закрытие серверного сокета для прерывания accept()
     if (server_fd_ >= 0) {
-        shutdown(server_fd_, SHUT_RDWR);
-        close(server_fd_);
+        shutdown_socket(server_fd_);
+        close_socket(server_fd_);
         server_fd_ = -1;
     }
 
@@ -120,8 +233,8 @@ void StorageServer::stop(uint32_t timeout_ms) {
         std::lock_guard<std::mutex> lock(connections_mutex_);
         for (auto& pair : active_connections_) {
             if (pair.first >= 0) {
-                shutdown(pair.first, SHUT_RDWR);
-                close(pair.first);
+                shutdown_socket(pair.first);
+                close_socket(pair.first);
             }
         }
         active_connections_.clear();
@@ -134,6 +247,10 @@ void StorageServer::stop(uint32_t timeout_ms) {
         }
     }
     worker_threads_.clear();
+
+#ifdef _WIN32
+    WSACleanup();
+#endif
 
     log_info("Storage server stopped");
 }
@@ -155,18 +272,22 @@ StorageServer::Stats StorageServer::get_stats() const {
 void StorageServer::accept_loop() {
     while (running_.load()) {
         struct sockaddr_in client_address;
+#ifdef _WIN32
+        int client_len = sizeof(client_address);
+#else
         socklen_t client_len = sizeof(client_address);
+#endif
         
         int client_fd = accept(server_fd_, (struct sockaddr*)&client_address, &client_len);
         
         if (client_fd < 0) {
-            if (errno == EINTR || errno == EAGAIN) {
+            if (is_socket_interrupted() || is_socket_would_block()) {
                 continue;
             }
             if (!running_.load()) {
                 break;
             }
-            log_error("Accept failed: " + std::string(strerror(errno)));
+            log_error("Accept failed: " + socket_error_message());
             continue;
         }
 
@@ -175,7 +296,7 @@ void StorageServer::accept_loop() {
             std::lock_guard<std::mutex> lock(connections_mutex_);
             if (static_cast<int>(active_connections_.size()) >= max_connections_) {
                 log_error("Max connections reached, rejecting new connection");
-                close(client_fd);
+                close_socket(client_fd);
                 continue;
             }
             active_connections_[client_fd] = true;
@@ -193,7 +314,7 @@ void StorageServer::accept_loop() {
             worker_threads_.emplace_back(&StorageServer::handle_client, this, client_fd);
         } catch (const std::exception& e) {
             log_error("Failed to create worker thread: " + std::string(e.what()));
-            close(client_fd);
+            close_socket(client_fd);
             {
                 std::lock_guard<std::mutex> lock(connections_mutex_);
                 active_connections_.erase(client_fd);
@@ -205,7 +326,7 @@ void StorageServer::accept_loop() {
 
 void StorageServer::handle_client(int client_fd) {
     auto cleanup = [this, client_fd]() {
-        close(client_fd);
+        close_socket(client_fd);
         {
             std::lock_guard<std::mutex> lock(connections_mutex_);
             active_connections_.erase(client_fd);
@@ -248,9 +369,9 @@ bool StorageServer::read_message(int fd, StorageMessage& msg) {
     
     size_t total_read = 0;
     while (total_read < HEADER_SIZE) {
-        ssize_t n = read(fd, header + total_read, HEADER_SIZE - total_read);
+        int n = socket_read(fd, header + total_read, HEADER_SIZE - total_read);
         if (n <= 0) {
-            if (n == 0 || (errno != EAGAIN && errno != EWOULDBLOCK)) {
+            if (n == 0 || !is_socket_would_block()) {
                 return false; // Соединение закрыто или ошибка
             }
             // Ждем данных
@@ -285,9 +406,9 @@ bool StorageServer::read_message(int fd, StorageMessage& msg) {
         msg.payload.resize(payload_len);
         size_t total_payload_read = 0;
         while (total_payload_read < payload_len) {
-            ssize_t n = read(fd, &msg.payload[total_payload_read], payload_len - total_payload_read);
+            int n = socket_read(fd, &msg.payload[total_payload_read], payload_len - total_payload_read);
             if (n <= 0) {
-                if (n == 0 || (errno != EAGAIN && errno != EWOULDBLOCK)) {
+                if (n == 0 || !is_socket_would_block()) {
                     return false;
                 }
                 continue;
@@ -305,12 +426,12 @@ bool StorageServer::write_message(int fd, const StorageMessage& msg) {
     
     size_t total_sent = 0;
     while (total_sent < data.size()) {
-        ssize_t n = send(fd, data.data() + total_sent, data.size() - total_sent, MSG_NOSIGNAL);
+        int n = socket_send(fd, data.data() + total_sent, data.size() - total_sent);
         if (n <= 0) {
-            if (errno == EPIPE) {
+            if (is_socket_broken_pipe()) {
                 return false; // Клиент закрыл соединение
             }
-            if (errno != EAGAIN && errno != EWOULDBLOCK) {
+            if (!is_socket_would_block()) {
                 return false;
             }
             continue;

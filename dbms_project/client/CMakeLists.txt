@@ -12,5 +12,9 @@ target_include_directories(dbms_client PRIVATE
 
 # 3. И в конце линкуем библиотеки для Windows
 if(WIN32)
+    target_compile_definitions(dbms_client PRIVATE
+            WINVER=0x0A00
+            _WIN32_WINNT=0x0A00
+    )
     target_link_libraries(dbms_client PRIVATE ws2_32 mswsock)
 endif()

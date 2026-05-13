@@ -9,6 +9,7 @@
 #include <functional>
 #include <mutex>
 #include <unordered_map>
+#include <cstdint>
 
 // Forward declaration - Engine is the actual storage engine class
 class Engine;

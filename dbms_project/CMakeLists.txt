@@ -61,11 +61,16 @@ add_library(storage_lib STATIC
 target_include_directories(storage_lib PUBLIC
     ${PROJECT_SOURCE_DIR}/server/storage/include
     ${PROJECT_SOURCE_DIR}/shared
+    ${PROJECT_SOURCE_DIR}/third_party/boost
+    ${PROJECT_SOURCE_DIR}/third_party
 )
 
 # Исполняемый файл сервера теперь линкуется с библиотекой
 add_executable(storage_server server/storage/src/main_storage_server.cpp)
 target_link_libraries(storage_server storage_lib pthread)
+if(WIN32)
+    target_link_libraries(storage_server ws2_32 mswsock)
+endif()
 
 # Клиент
 add_subdirectory(client)
@@ -102,3 +107,6 @@ target_include_directories(cluster_entrypoint PRIVATE
     ${PROJECT_SOURCE_DIR}/shared
 )
 target_link_libraries(cluster_entrypoint pthread)
+if(WIN32)
+    target_link_libraries(cluster_entrypoint ws2_32 mswsock)
+endif()

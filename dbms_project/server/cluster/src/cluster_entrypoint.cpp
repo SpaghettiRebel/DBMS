@@ -11,16 +11,74 @@
 #include <chrono>
 #include <iomanip>
 #include <algorithm>
+#include <stdexcept>
 
+#ifdef _WIN32
+#include <winsock2.h>
+#include <ws2tcpip.h>
+#else
 #include <sys/socket.h>
 #include <netinet/in.h>
 #include <arpa/inet.h>
 #include <unistd.h>
-#include <fcntl.h>
+#endif
 #include <errno.h>
 
-constexpr uint32_t PROTOCOL_MAGIC = 0x44424D53;
+constexpr uint32_t PROTOCOL_MAGIC = 0xDB000001;
 constexpr size_t MAX_MESSAGE_SIZE = 10 * 1024 * 1024;
+
+namespace {
+
+#ifdef _WIN32
+bool ensure_winsock_started() {
+    static std::once_flag init_flag;
+    static bool initialized = false;
+    std::call_once(init_flag, []() {
+        WSADATA wsa_data{};
+        initialized = (WSAStartup(MAKEWORD(2, 2), &wsa_data) == 0);
+    });
+    return initialized;
+}
+
+void close_socket(int fd) {
+    closesocket(static_cast<SOCKET>(fd));
+}
+
+void shutdown_socket(int fd) {
+    shutdown(static_cast<SOCKET>(fd), SD_BOTH);
+}
+
+bool is_retryable_socket_error() {
+    const int code = WSAGetLastError();
+    return code == WSAEINTR || code == WSAEWOULDBLOCK;
+}
+
+int send_flags() {
+    return 0;
+}
+#else
+bool ensure_winsock_started() {
+    return true;
+}
+
+void close_socket(int fd) {
+    close(fd);
+}
+
+void shutdown_socket(int fd) {
+    shutdown(fd, SHUT_RDWR);
+}
+
+bool is_retryable_socket_error() {
+    return errno == EINTR || errno == EAGAIN;
+}
+
+int send_flags() {
+    return MSG_NOSIGNAL;
+}
+#endif
+
+}
 
 ClusterEntrypoint::ClusterEntrypoint(const std::string& host, uint16_t port, int heartbeat_interval_ms)
     : host_(host), port_(port), heartbeat_interval_ms_(heartbeat_interval_ms),
@@ -36,12 +94,23 @@ ClusterEntrypoint::~ClusterEntrypoint() { stop(); }
 
 bool ClusterEntrypoint::start() {
     if (running_.load()) { log_error("Already running"); return false; }
+
+    if (!ensure_winsock_started()) {
+        log_error("WSAStartup failed");
+        return false;
+    }
     
-    server_fd_ = socket(AF_INET, SOCK_STREAM, 0);
+    server_fd_ = static_cast<int>(socket(AF_INET, SOCK_STREAM, 0));
     if (server_fd_ < 0) { log_error("Socket failed: " + std::string(strerror(errno))); return false; }
     
     int opt = 1;
-    setsockopt(server_fd_, SOL_SOCKET, SO_REUSEADDR, &opt, sizeof(opt));
+    setsockopt(server_fd_, SOL_SOCKET, SO_REUSEADDR,
+#ifdef _WIN32
+               reinterpret_cast<const char*>(&opt),
+#else
+               &opt,
+#endif
+               sizeof(opt));
     
     struct sockaddr_in address{};
     address.sin_family = AF_INET;
@@ -49,9 +118,9 @@ bool ClusterEntrypoint::start() {
     inet_pton(AF_INET, host_.c_str(), &address.sin_addr);
     
     if (bind(server_fd_, (struct sockaddr*)&address, sizeof(address)) < 0) {
-        log_error("Bind failed"); close(server_fd_); return false;
+        log_error("Bind failed"); close_socket(server_fd_); return false;
     }
-    if (listen(server_fd_, 100) < 0) { log_error("Listen failed"); close(server_fd_); return false; }
+    if (listen(server_fd_, 100) < 0) { log_error("Listen failed"); close_socket(server_fd_); return false; }
     
     running_.store(true);
     
@@ -72,7 +141,7 @@ void ClusterEntrypoint::stop(uint32_t) {
     running_.store(false);
     if (async_queue_) async_queue_->stop(true);
     if (heartbeat_monitor_) heartbeat_monitor_->stop();
-    if (server_fd_ >= 0) { shutdown(server_fd_, SHUT_RDWR); close(server_fd_); server_fd_ = -1; }
+    if (server_fd_ >= 0) { shutdown_socket(server_fd_); close_socket(server_fd_); server_fd_ = -1; }
     if (accept_thread_.joinable()) accept_thread_.join();
     { std::lock_guard<std::mutex> lock(nodes_mutex_); for(auto& p : nodes_) p.second->disconnect(); nodes_.clear(); }
     log_info("Stopped");
@@ -184,24 +253,29 @@ ClusterEntrypoint::ClusterStats ClusterEntrypoint::get_stats() const {
 
 void ClusterEntrypoint::accept_loop() {
     while (running_.load()) {
-        sockaddr_in ca{}; socklen_t cl = sizeof(ca);
+        sockaddr_in ca{};
+#ifdef _WIN32
+        int cl = sizeof(ca);
+#else
+        socklen_t cl = sizeof(ca);
+#endif
         int cfd = accept(server_fd_, (sockaddr*)&ca, &cl);
-        if (cfd < 0) { if(errno==EINTR||errno==EAGAIN) continue; if(!running_.load()) break; continue; }
+        if (cfd < 0) { if(is_retryable_socket_error()) continue; if(!running_.load()) break; continue; }
         std::thread([this,cfd](){ handle_client(cfd); }).detach();
     }
 }
 
 void ClusterEntrypoint::handle_client(int cfd) {
-    auto cleanup = [cfd](){ close(cfd); };
+    auto cleanup = [cfd](){ close_socket(cfd); };
     try {
         uint8_t hdr[21]; 
-        if(recv(cfd, hdr, 21, 0) != 21) { cleanup(); return; }
+        if(recv(cfd, reinterpret_cast<char*>(hdr), 21, 0) != 21) { cleanup(); return; }
         uint32_t magic; memcpy(&magic, hdr, 4);
         if(magic != PROTOCOL_MAGIC) { cleanup(); return; }
         uint32_t plen; memcpy(&plen, hdr+17, 4);
         if(plen > MAX_MESSAGE_SIZE) { cleanup(); return; }
         std::string query(plen, 0);
-        if(plen > 0 && recv(cfd, &query[0], plen, 0) != (ssize_t)plen) { cleanup(); return; }
+        if(plen > 0 && recv(cfd, &query[0], static_cast<int>(plen), 0) != static_cast<int>(plen)) { cleanup(); return; }
         
         QueryResult res = execute_query(query, std::to_string(cfd));
         std::string resp = res.success ? res.data : res.error_message;
@@ -216,7 +290,7 @@ void ClusterEntrypoint::handle_client(int cfd) {
         memcpy(out.data()+off, &ts, 8); off+=8;
         uint32_t rlen = resp.size(); memcpy(out.data()+off, &rlen, 4); off+=4;
         if(!resp.empty()) memcpy(out.data()+off, resp.data(), resp.size());
-        send(cfd, out.data(), out.size(), MSG_NOSIGNAL);
+        send(cfd, reinterpret_cast<const char*>(out.data()), static_cast<int>(out.size()), send_flags());
     } catch(...) { total_errors_++; }
     cleanup();
 }

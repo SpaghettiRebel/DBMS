@@ -4,6 +4,10 @@
 #include <iostream>
 #include <csignal>
 #include <atomic>
+#include <thread>
+#include <chrono>
+#include <string>
+#include <exception>
 
 // Глобальный флаг для graceful shutdown
 std::atomic<bool> g_shutdown_requested(false);
