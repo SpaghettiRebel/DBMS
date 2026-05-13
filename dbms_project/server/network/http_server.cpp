@@ -10,6 +10,12 @@
 #undef DELETE
 #endif
 
+// --- ДОБАВЬ ЭТИ ТРИ СТРОКИ ---
+#ifdef DEBUG
+#undef DEBUG
+#endif
+// -----------------------------
+
 #if __has_include(<crow.h>)
 #include <crow.h>
 #elif __has_include(<crow/crow.h>)
@@ -149,8 +155,8 @@ namespace dbms::network {
 int run_http_server(const std::string& data_root, const std::string& bind_host, std::uint16_t port,
     const std::string& jwt_secret) {
 
-    crow::App<dbms::auth::JwtMiddleware> app;
-    app.get_middleware<dbms::auth::JwtMiddleware>().set_secret(jwt_secret);
+    crow::App<> app;
+   // app.get_middleware<dbms::auth::JwtMiddleware>().set_secret(jwt_secret);
 
     Engine engine(data_root);
 
