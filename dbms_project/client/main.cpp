@@ -8,7 +8,7 @@ int main(int argc, char* argv[]) {
     std::string line;
     std::string command_buffer;
 
-    httplib::Client client("127.0.0.1", 8000);
+    httplib::Client client("127.0.0.1", 18080);
 
     while (true) {
         std::cout << "dbms> " << std::flush;
