@@ -1,8 +1,8 @@
 #include "http_server.h"
 
-#include <algorithm>
-#include <cctype>
 #include <exception>
+#include <mutex>
+#include <optional>
 #include <string>
 #include <utility>
 
@@ -32,94 +32,36 @@
 
 using json = nlohmann::json;
 
+struct yy_buffer_state;
+typedef yy_buffer_state* YY_BUFFER_STATE;
+
+YY_BUFFER_STATE yy_scan_string(const char* yy_str);
+void yy_delete_buffer(YY_BUFFER_STATE buffer);
+int yyparse(void);
+
+extern QueryPlan parsed_query_plan;
+void reset_parsed_query_plan();
+
 namespace {
 
-std::string to_lower_ascii(std::string value) {
-    std::transform(value.begin(), value.end(), value.begin(), [](unsigned char ch) {
-        return static_cast<char>(std::tolower(ch));
-    });
-    return value;
-}
+std::optional<QueryPlan> parse_sql_with_bison(const std::string& query_text) {
+    static std::mutex parser_mutex;
+    const std::lock_guard<std::mutex> lock(parser_mutex);
 
-std::string trim(std::string value) {
-    std::size_t left = 0;
-    while (left < value.size() && std::isspace(static_cast<unsigned char>(value[left])) != 0) {
-        ++left;
-    }
-    std::size_t right = value.size();
-    while (right > left && std::isspace(static_cast<unsigned char>(value[right - 1])) != 0) {
-        --right;
-    }
-    return value.substr(left, right - left);
-}
-
-std::string normalize_identifier(std::string value) {
-    value = trim(std::move(value));
-    while (!value.empty() && value.back() == ';') {
-        value.pop_back();
-    }
-    return trim(std::move(value));
-}
-
-std::string extract_identifier_after_keyword(const std::string& text, const std::string& keyword) {
-    const std::string lower_text = to_lower_ascii(text);
-    const std::string lower_keyword = to_lower_ascii(keyword);
-    const std::size_t pos = lower_text.find(lower_keyword);
-    if (pos == std::string::npos) {
-        return {};
+    reset_parsed_query_plan();
+    YY_BUFFER_STATE buffer = yy_scan_string(query_text.c_str());
+    if (buffer == nullptr) {
+        return std::nullopt;
     }
 
-    std::size_t begin = pos + lower_keyword.size();
-    while (begin < text.size() && std::isspace(static_cast<unsigned char>(text[begin])) != 0) {
-        ++begin;
+    const int parse_result = yyparse();
+    yy_delete_buffer(buffer);
+
+    if (parse_result != 0) {
+        return std::nullopt;
     }
 
-    std::size_t end = begin;
-    while (end < text.size()) {
-        const unsigned char c = static_cast<unsigned char>(text[end]);
-        if (std::isalnum(c) == 0 && c != '_') {
-            break;
-        }
-        ++end;
-    }
-
-    if (end <= begin) {
-        return {};
-    }
-    return text.substr(begin, end - begin);
-}
-
-QueryPlan build_mock_query_plan(const std::string& query_text) {
-    QueryPlan plan{};
-    plan.type = QueryType::SELECT;
-
-    const std::string normalized = trim(query_text);
-    const std::string lower = to_lower_ascii(normalized);
-
-    if (lower.rfind("use ", 0) == 0) {
-        plan.type = QueryType::USE_DATABASE;
-        plan.database_name = normalize_identifier(normalized.substr(4));
-        return plan;
-    }
-
-    if (lower.rfind("create database ", 0) == 0) {
-        plan.type = QueryType::CREATE_DATABASE;
-        plan.database_name = normalize_identifier(normalized.substr(16));
-        return plan;
-    }
-
-    if (lower.rfind("drop database ", 0) == 0) {
-        plan.type = QueryType::DROP_DATABASE;
-        plan.database_name = normalize_identifier(normalized.substr(14));
-        return plan;
-    }
-
-    plan.type = QueryType::SELECT;
-    plan.table_name = extract_identifier_after_keyword(normalized, "from");
-    if (plan.table_name.empty()) {
-        plan.table_name = "__mock_table__";
-    }
-    return plan;
+    return std::optional<QueryPlan>(std::move(parsed_query_plan));
 }
 
 crow::response json_response(int code, const json& payload) {
@@ -191,11 +133,18 @@ int run_http_server(const std::string& data_root, const std::string& bind_host, 
             }
 
             const std::string query_text = request_body["query"].get<std::string>();
-            QueryPlan mock_plan = build_mock_query_plan(query_text);
-            engine.execute(mock_plan);
+            std::optional<QueryPlan> parsed_plan = parse_sql_with_bison(query_text);
+            if (!parsed_plan.has_value()) {
+                json error_payload = json::array();
+                error_payload.push_back({{"error", "sql_parse_error"}});
+                return json_response(400, error_payload);
+            }
 
-            if (mock_plan.type == QueryType::SELECT) {
-                const std::string raw_result = engine.select_records(mock_plan);
+            QueryPlan& plan = *parsed_plan;
+            engine.execute(plan);
+
+            if (plan.type == QueryType::SELECT) {
+                const std::string raw_result = engine.select_records(plan);
                 json parsed = json::parse(raw_result);
                 return json_response(200, as_array_of_objects(std::move(parsed)));
             }

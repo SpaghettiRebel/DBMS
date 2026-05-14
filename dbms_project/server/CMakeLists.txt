@@ -1,14 +1,35 @@
 cmake_minimum_required(VERSION 3.16)
 
-project(dbms_server LANGUAGES CXX)
+project(dbms_server LANGUAGES C CXX)
 
 set(CMAKE_CXX_STANDARD 20)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
 set(CMAKE_CXX_EXTENSIONS OFF)
 
+find_package(BISON REQUIRED)
+find_package(FLEX REQUIRED)
+
 # Определяем пути к корню и сторонним библиотекам
 set(DBMS_ROOT_DIR ${CMAKE_CURRENT_SOURCE_DIR}/..)
 set(THIRD_PARTY_DIR ${DBMS_ROOT_DIR}/third_party)
+set(PARSER_GEN_DIR ${CMAKE_CURRENT_BINARY_DIR}/parser_generated)
+
+file(MAKE_DIRECTORY ${PARSER_GEN_DIR})
+
+BISON_TARGET(
+        DbmsSqlParser
+        ${CMAKE_CURRENT_SOURCE_DIR}/parser/grammar.y
+        ${PARSER_GEN_DIR}/grammar.tab.cpp
+        DEFINES_FILE ${PARSER_GEN_DIR}/grammar.tab.h
+)
+
+FLEX_TARGET(
+        DbmsSqlLexer
+        ${CMAKE_CURRENT_SOURCE_DIR}/parser/lexer.l
+        ${PARSER_GEN_DIR}/lex.yy.cpp
+)
+
+ADD_FLEX_BISON_DEPENDENCY(DbmsSqlLexer DbmsSqlParser)
 
 # Список исходников ядра (код напарника)
 set(STORAGE_CORE_SOURCES
@@ -41,6 +62,8 @@ add_executable(dbms_http_server
         main.cpp
         network/http_server.cpp
         network/auth.cpp
+        ${BISON_DbmsSqlParser_OUTPUTS}
+        ${FLEX_DbmsSqlLexer_OUTPUTS}
 )
 
 # Добавляем пути поиска заголовков для сервера (Crow и всё остальное)
@@ -52,6 +75,7 @@ target_include_directories(dbms_http_server
         ${DBMS_ROOT_DIR}/shared
         ${THIRD_PARTY_DIR}/crow
         ${THIRD_PARTY_DIR}/boost
+        ${PARSER_GEN_DIR}
 )
 
 # Поиск системных библиотек (потоки)

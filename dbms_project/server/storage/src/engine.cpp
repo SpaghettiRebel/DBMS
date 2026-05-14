@@ -242,17 +242,25 @@ bool build_insert_values(const QueryPlan& plan, const std::vector<ColumnDef>& sc
     StringPool* pool, std::vector<Value>& out_values) {
     auto col_index = build_column_index(schema);
 
-    if (plan.target_columns.size() != plan.values.size()) {
+    std::vector<std::string> target_columns = plan.target_columns;
+    if (target_columns.empty()) {
+        target_columns.reserve(schema.size());
+        for (const auto& column : schema) {
+            target_columns.push_back(column.name);
+        }
+    }
+
+    if (target_columns.size() != plan.values.size()) {
         throw std::runtime_error("Columns and values size mismatch");
     }
 
-    for (size_t i = 0; i < plan.target_columns.size(); ++i) {
-        if (col_index.find(plan.target_columns[i]) == col_index.end()) {
-            throw std::runtime_error("Unknown column: " + plan.target_columns[i]);
+    for (size_t i = 0; i < target_columns.size(); ++i) {
+        if (col_index.find(target_columns[i]) == col_index.end()) {
+            throw std::runtime_error("Unknown column: " + target_columns[i]);
         }
-        for (size_t j = i + 1; j < plan.target_columns.size(); ++j) {
-            if (plan.target_columns[i] == plan.target_columns[j]) {
-                throw std::runtime_error("Duplicate column: " + plan.target_columns[i]);
+        for (size_t j = i + 1; j < target_columns.size(); ++j) {
+            if (target_columns[i] == target_columns[j]) {
+                throw std::runtime_error("Duplicate column: " + target_columns[i]);
             }
         }
     }
@@ -261,8 +269,8 @@ bool build_insert_values(const QueryPlan& plan, const std::vector<ColumnDef>& sc
 
     for (size_t i = 0; i < schema.size(); ++i) {
         bool provided = false;
-        for (size_t j = 0; j < plan.target_columns.size(); ++j) {
-            if (plan.target_columns[j] == schema[i].name) {
+        for (size_t j = 0; j < target_columns.size(); ++j) {
+            if (target_columns[j] == schema[i].name) {
                 json scalar_value;
                 if (!value_to_json_scalar(plan.values[j], scalar_value) ||
                     !json_to_storage_value(scalar_value, schema[i].type == DataType::INT, out_values[i], pool, true)) {
