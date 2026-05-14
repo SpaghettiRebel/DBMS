@@ -47,10 +47,23 @@ KW_FROM         [Ff][Rr][Oo][Mm]
 KW_WHERE        [Ww][Hh][Ee][Rr][Ee]
 KW_INSERT       [Ii][Nn][Ss][Ee][Rr][Tt]
 KW_INTO         [Ii][Nn][Tt][Oo]
+KW_VALUE        [Vv][Aa][Ll][Uu][Ee]
 KW_VALUES       [Vv][Aa][Ll][Uu][Ee][Ss]
 KW_CREATE       [Cc][Rr][Ee][Aa][Tt][Ee]
+KW_DROP         [Dd][Rr][Oo][Pp]
 KW_TABLE        [Tt][Aa][Bb][Ll][Ee]
 KW_DATABASE     [Dd][Aa][Tt][Aa][Bb][Aa][Ss][Ee]
+KW_UPDATE       [Uu][Pp][Dd][Aa][Tt][Ee]
+KW_SET          [Ss][Ee][Tt]
+KW_DELETE       [Dd][Ee][Ll][Ee][Tt][Ee]
+KW_AS           [Aa][Ss]
+KW_BETWEEN      [Bb][Ee][Tt][Ww][Ee][Ee][Nn]
+KW_LIKE         [Ll][Ii][Kk][Ee]
+KW_AND          [Aa][Nn][Dd]
+KW_OR           [Oo][Rr]
+KW_NOT          [Nn][Oo][Tt]
+KW_NULL         [Nn][Uu][Ll][Ll]
+KW_INDEXED      [Ii][Nn][Dd][Ee][Xx][Ee][Dd]
 KW_INT          [Ii][Nn][Tt]
 KW_TEXT         [Tt][Ee][Xx][Tt]
 
@@ -64,10 +77,23 @@ KW_TEXT         [Tt][Ee][Xx][Tt]
 {KW_WHERE}      { return WHERE; }
 {KW_INSERT}     { return INSERT; }
 {KW_INTO}       { return INTO; }
+{KW_VALUE}      { return VALUES; }
 {KW_VALUES}     { return VALUES; }
 {KW_CREATE}     { return CREATE; }
+{KW_DROP}       { return DROP; }
 {KW_TABLE}      { return TABLE; }
 {KW_DATABASE}   { return DATABASE; }
+{KW_UPDATE}     { return UPDATE; }
+{KW_SET}        { return SET; }
+{KW_DELETE}     { return DELETE; }
+{KW_AS}         { return AS; }
+{KW_BETWEEN}    { return BETWEEN; }
+{KW_LIKE}       { return LIKE; }
+{KW_AND}        { return AND; }
+{KW_OR}         { return OR; }
+{KW_NOT}        { return NOT; }
+{KW_NULL}       { return NULL_T; }
+{KW_INDEXED}    { return INDEXED; }
 {KW_INT}        { return INT; }
 {KW_TEXT}       { return TEXT; }
 
@@ -76,6 +102,10 @@ KW_TEXT         [Tt][Ee][Xx][Tt]
 "("             { return '('; }
 ")"             { return ')'; }
 ";"             { return ';'; }
+"=="            { return EQEQ; }
+"!="            { return NEQ; }
+">="            { return GEQ; }
+"<="            { return LEQ; }
 "="             { return '='; }
 ">"             { return '>'; }
 "<"             { return '<'; }

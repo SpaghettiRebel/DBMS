@@ -771,6 +771,18 @@ void Engine::drop_table(const std::string& table_name) {
 }
 
 void Engine::insert_record(const QueryPlan& plan) {
+    if (!plan.value_rows.empty()) {
+        for (const auto& row_values : plan.value_rows) {
+            QueryPlan single_row_plan{};
+            single_row_plan.type = QueryType::INSERT;
+            single_row_plan.table_name = plan.table_name;
+            single_row_plan.target_columns = plan.target_columns;
+            single_row_plan.values = row_values;
+            insert_record(single_row_plan);
+        }
+        return;
+    }
+
     if (current_db.empty()) throw std::runtime_error("No active DB");
 
     fs::path db_dir = fs::path(root_path) / current_db;

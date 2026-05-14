@@ -86,6 +86,8 @@ struct QueryPlan {
     std::vector<std::string> target_columns;
     // Значения для вставки (или новые значения для UPDATE) [cite: 42, 43]
     std::vector<Value> values;
+    // Многострочная вставка: VALUES (...), (...)
+    std::vector<std::vector<Value>> value_rows;
 
     // --- Для DML (SELECT) ---
     std::vector<SelectTarget> select_targets;  // Выбираемые колонки [cite: 44]
