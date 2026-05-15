@@ -11,12 +11,15 @@ constexpr size_t MAX_NAME_LEN = 64;
 
 struct ColumnMetadata {
     char name[MAX_NAME_LEN];
-    uint8_t type;          // 0 для INT, 1 для STRING [cite: 7]
-    bool is_not_null;      // [cite: 19]
-    bool is_indexed;       // [cite: 20]
-    bool has_default;      // [cite: 75]
+    uint8_t type;          // 0 для INT, 1 для STRING
+    bool is_not_null;
+    bool is_indexed;
+    bool is_unique;
+    bool is_autoincrement;
+    bool has_default;
     int32_t default_int;
-    uint32_t default_string_id; // Added support for string defaults
+    uint32_t default_string_id;
+    int64_t next_autoincrement_value;
 };
 
 // pos_t определяется в record.h, здесь только forward declaration

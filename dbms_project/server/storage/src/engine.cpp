@@ -1,5 +1,6 @@
 #include "../include/engine.h"
 
+#include <algorithm>
 #include <chrono>
 #include <cstring>
 #include <filesystem>
@@ -12,6 +13,7 @@
 #include <sstream>
 #include <stdexcept>
 #include <unordered_map>
+#include <unordered_set>
 
 #include "../include/serializer.h"
 
@@ -114,9 +116,15 @@ std::vector<char> read_page_copy(Pager& pager, uint32_t page_id) {
 
 BP_tree<int, pos_t> open_index_tree(Pager& idx_p, uint32_t& root_page_id) {
     if (root_page_id == 0) {
-        root_page_id = idx_p.allocate_page();
+        return BP_tree<int, pos_t>(&idx_p, 0);
     }
-    return BP_tree<int, pos_t>(&idx_p, root_page_id);
+    try {
+        return BP_tree<int, pos_t>(&idx_p, root_page_id);
+    } catch (...) {
+        // Backward-compatible recovery for previously uninitialized/corrupted index roots.
+        root_page_id = 0;
+        return BP_tree<int, pos_t>(&idx_p, 0);
+    }
 }
 
 void flush_index_tree(BP_tree<int, pos_t>& tree, uint32_t& root_page_id) {
@@ -238,7 +246,121 @@ std::unordered_map<std::string, size_t> build_column_index(const std::vector<Col
     return map;
 }
 
-bool build_insert_values(const QueryPlan& plan, const std::vector<ColumnDef>& schema, const TableHeader& h,
+std::string query_aggregate_name(AggregateType type) {
+    switch (type) {
+        case AggregateType::SUM:
+            return "SUM";
+        case AggregateType::MIN:
+            return "MIN";
+        case AggregateType::MAX:
+            return "MAX";
+        case AggregateType::AVG:
+            return "AVG";
+        case AggregateType::COUNT:
+            return "COUNT";
+        default:
+            return "NONE";
+    }
+}
+
+int compare_json_for_order(const json& lhs, const json& rhs) {
+    const bool lhs_nullish = lhs.is_null();
+    const bool rhs_nullish = rhs.is_null();
+    if (lhs_nullish && rhs_nullish) return 0;
+    if (lhs_nullish) return 1;
+    if (rhs_nullish) return -1;
+
+    if (lhs.is_number_integer() && rhs.is_number_integer()) {
+        const auto l = lhs.get<int64_t>();
+        const auto r = rhs.get<int64_t>();
+        if (l < r) return -1;
+        if (l > r) return 1;
+        return 0;
+    }
+
+    if (lhs.is_string() && rhs.is_string()) {
+        const auto& l = lhs.get_ref<const std::string&>();
+        const auto& r = rhs.get_ref<const std::string&>();
+        if (l < r) return -1;
+        if (l > r) return 1;
+        return 0;
+    }
+
+    const std::string l = lhs.dump();
+    const std::string r = rhs.dump();
+    if (l < r) return -1;
+    if (l > r) return 1;
+    return 0;
+}
+
+void apply_group_by_rows(json& rows, const std::string& group_column) {
+    if (group_column.empty() || !rows.is_array()) return;
+
+    std::unordered_set<std::string> seen;
+    json grouped = json::array();
+
+    for (const auto& row : rows) {
+        if (!row.is_object()) continue;
+        if (!row.contains(group_column)) {
+            throw std::runtime_error("Unknown GROUP BY column: " + group_column);
+        }
+
+        const std::string key = row.at(group_column).dump();
+        if (seen.insert(key).second) {
+            grouped.push_back(row);
+        }
+    }
+
+    rows = std::move(grouped);
+}
+
+void apply_order_by_rows(json& rows, const QueryPlan& plan) {
+    if (plan.order_by_column.empty() || !rows.is_array() || rows.empty()) return;
+
+    auto has_column = [&](const std::string& key) {
+        for (const auto& row : rows) {
+            if (row.is_object() && row.contains(key)) {
+                return true;
+            }
+        }
+        return false;
+    };
+
+    std::string order_key = plan.order_by_column;
+    if (!has_column(order_key)) {
+        for (const auto& target : plan.select_targets) {
+            const std::string output_name = target.alias.empty()
+                                                ? (target.aggregate == AggregateType::NONE
+                                                       ? target.column_name
+                                                       : query_aggregate_name(target.aggregate) + "(" +
+                                                             target.column_name + ")")
+                                                : target.alias;
+
+            if (target.column_name == plan.order_by_column || target.alias == plan.order_by_column ||
+                output_name == plan.order_by_column) {
+                if (has_column(output_name)) {
+                    order_key = output_name;
+                    break;
+                }
+            }
+        }
+    }
+
+    if (!has_column(order_key)) {
+        throw std::runtime_error("Unknown ORDER BY column: " + plan.order_by_column);
+    }
+
+    std::stable_sort(rows.begin(), rows.end(), [&](const json& a, const json& b) {
+        const json a_value = a.contains(order_key) ? a.at(order_key) : json(nullptr);
+        const json b_value = b.contains(order_key) ? b.at(order_key) : json(nullptr);
+        const int cmp = compare_json_for_order(a_value, b_value);
+        if (cmp == 0) return false;
+        if (plan.order_descending) return cmp > 0;
+        return cmp < 0;
+    });
+}
+
+bool build_insert_values(const QueryPlan& plan, const std::vector<ColumnDef>& schema, TableHeader& h,
     StringPool* pool, std::vector<Value>& out_values) {
     auto col_index = build_column_index(schema);
 
@@ -282,7 +404,10 @@ bool build_insert_values(const QueryPlan& plan, const std::vector<ColumnDef>& sc
         }
 
         if (!provided) {
-            if (h.columns[i].has_default) {
+            if (h.columns[i].is_autoincrement) {
+                out_values[i].is_null = false;
+                out_values[i].data = static_cast<int>(h.columns[i].next_autoincrement_value++);
+            } else if (h.columns[i].has_default) {
                 out_values[i].is_null = false;
                 if (h.columns[i].type == 0) {
                     out_values[i].data = h.columns[i].default_int;
@@ -314,6 +439,16 @@ bool build_insert_values(const QueryPlan& plan, const std::vector<ColumnDef>& sc
                     auto id = resolve_string_id(pool, std::get<std::string>(out_values[i].data), true);
                     if (!id.has_value()) throw std::runtime_error("String interning failed");
                     out_values[i].data = static_cast<int>(*id);
+                }
+            }
+
+            if (h.columns[i].is_autoincrement) {
+                if (h.columns[i].type != 0 || !std::holds_alternative<int>(out_values[i].data)) {
+                    throw std::runtime_error("AUTO_INCREMENT requires INT column " + schema[i].name);
+                }
+                const auto current_value = static_cast<int64_t>(std::get<int>(out_values[i].data));
+                if (current_value >= h.columns[i].next_autoincrement_value) {
+                    h.columns[i].next_autoincrement_value = current_value + 1;
                 }
             }
         }
@@ -624,43 +759,37 @@ void Engine::use_database(const std::string& name) {
 }
 
 void Engine::execute(const QueryPlan& plan) {
-    try {
-        switch (plan.type) {
-            case QueryType::CREATE_DATABASE:
-                create_database(plan.database_name);
-                break;
-            case QueryType::DROP_DATABASE:
-                drop_database(plan.database_name);
-                break;
-            case QueryType::USE_DATABASE:
-                use_database(plan.database_name);
-                break;
-            case QueryType::CREATE_TABLE:
-                create_table(plan);
-                break;
-            case QueryType::DROP_TABLE:
-                drop_table(plan.table_name);
-                break;
-            case QueryType::INSERT:
-                insert_record(plan);
-                break;
-            case QueryType::SELECT:
-                std::cout << select_records(plan) << std::endl;
-                break;
-            case QueryType::REVERT:
-                revert(plan.table_name, plan.timestamp);
-                break;
-            case QueryType::UPDATE:
-                update_records(plan);
-                break;
-            case QueryType::DELETE:
-                delete_records(plan);
-                break;
-        }
-    } catch (const std::exception& e) {
-        std::cerr << "Engine Error: " << e.what() << std::endl;
-    } catch (...) {
-        std::cerr << "Engine Error: unknown failure" << std::endl;
+    switch (plan.type) {
+        case QueryType::CREATE_DATABASE:
+            create_database(plan.database_name);
+            break;
+        case QueryType::DROP_DATABASE:
+            drop_database(plan.database_name);
+            break;
+        case QueryType::USE_DATABASE:
+            use_database(plan.database_name);
+            break;
+        case QueryType::CREATE_TABLE:
+            create_table(plan);
+            break;
+        case QueryType::DROP_TABLE:
+            drop_table(plan.table_name);
+            break;
+        case QueryType::INSERT:
+            insert_record(plan);
+            break;
+        case QueryType::SELECT:
+            std::cout << select_records(plan) << std::endl;
+            break;
+        case QueryType::REVERT:
+            revert(plan.table_name, plan.timestamp);
+            break;
+        case QueryType::UPDATE:
+            update_records(plan);
+            break;
+        case QueryType::DELETE:
+            delete_records(plan);
+            break;
     }
 }
 
@@ -719,8 +848,20 @@ void Engine::create_table(const QueryPlan& plan) {
         h.columns[i].type = (plan.columns[i].type == DataType::INT ? 0 : 1);
         h.columns[i].is_not_null = plan.columns[i].is_not_null;
         h.columns[i].is_indexed = plan.columns[i].is_indexed;
+        h.columns[i].is_unique = plan.columns[i].is_unique;
+        h.columns[i].is_autoincrement = plan.columns[i].is_autoincrement;
+        h.columns[i].next_autoincrement_value = 1;
 
-        if (plan.columns[i].default_value.has_value()) {
+        if (h.columns[i].is_unique) {
+            h.columns[i].is_indexed = true;
+        }
+
+        if (h.columns[i].is_autoincrement && plan.columns[i].default_value.has_value() &&
+            !plan.columns[i].default_value->is_null) {
+            throw std::runtime_error("AUTO_INCREMENT cannot have non-NULL DEFAULT on " + plan.columns[i].name);
+        }
+
+        if (plan.columns[i].default_value.has_value() && !plan.columns[i].default_value->is_null) {
             h.columns[i].has_default = true;
             if (plan.columns[i].type == DataType::INT) {
                 if (!std::holds_alternative<int>(plan.columns[i].default_value->data)) {
@@ -740,11 +881,12 @@ void Engine::create_table(const QueryPlan& plan) {
     Pager tbl_p(tbl_path.string());
     tbl_p.allocate_page();
 
-    // ensure idx file exists and reserve a stable root page per indexed column
+    // ensure idx file exists and initialize persistent trees per indexed column
     Pager idx_p(idx_path.string());
     for (size_t i = 0; i < h.column_count; ++i) {
-        if (h.columns[i].is_indexed && h.index_roots[i] == 0) {
-            h.index_roots[i] = idx_p.allocate_page();
+        if (h.columns[i].is_indexed) {
+            BP_tree<int, pos_t> tree(&idx_p, 0);
+            flush_index_tree(tree, h.index_roots[i]);
         }
     }
 
@@ -820,9 +962,9 @@ void Engine::insert_record(const QueryPlan& plan) {
 
     last_page_backup = read_page_copy(tbl_p, h.last_data_page);
 
-    // check uniqueness before any write
+    // check unique constraints before any write
     for (size_t i = 0; i < h.column_count; ++i) {
-        if (!h.columns[i].is_indexed) continue;
+        if (!h.columns[i].is_unique) continue;
 
         int key = 0;
         if (!value_to_storage_key(values[i], h.columns[i].type == 0, key, string_pool.get(), true)) {
@@ -936,12 +1078,12 @@ std::string Engine::select_records(const QueryPlan& plan) {
     // Используем QueryOptimizer для выбора плана выполнения
     ExecutionPlan exec_plan = query_optimizer->analyze(plan.table_name, plan.where_clause.get(), schema);
 
-    json res = json::array();
-
     if (has_aggregates) {
         // Обработка запроса с агрегатными функциями
         return select_with_aggregates(db_dir, plan, schema, h, exec_plan);
     }
+
+    json res = json::array();
 
     if (exec_plan.strategy == ExecutionStrategy::INDEX_SEEK ||
         exec_plan.strategy == ExecutionStrategy::INDEX_RANGE_SCAN) {
@@ -970,12 +1112,14 @@ std::string Engine::select_records(const QueryPlan& plan) {
                 }
             }
         }
+
+        apply_group_by_rows(res, plan.group_by_column);
+        apply_order_by_rows(res, plan);
+        return res.dump(4);
     } else {
         // Полный сканирование таблицы (fallback)
         return select_full_scan(db_dir, plan, schema, h);
     }
-
-    return res.dump(4);
 }
 
 void Engine::delete_records(const QueryPlan& plan) {
@@ -1152,9 +1296,9 @@ void Engine::update_records(const QueryPlan& plan) {
                         for (const auto& c : schema) all_cols.push_back(c.name);
                         auto new_payload = RowSerializer::serialize(schema, all_cols, new_values);
 
-                        // Pre-validate indexed uniqueness BEFORE mutating anything
+                        // Pre-validate unique constraints BEFORE mutating anything
                         for (size_t c = 0; c < h.column_count; ++c) {
-                            if (!h.columns[c].is_indexed) continue;
+                            if (!h.columns[c].is_unique) continue;
 
                             int old_key = 0;
                             int new_key = 0;
@@ -1523,6 +1667,22 @@ std::vector<ColumnDef> Engine::get_table_schema(const std::string& table_name) {
         c.type = (h.columns[i].type == 0 ? DataType::INT : DataType::STRING);
         c.is_not_null = h.columns[i].is_not_null;
         c.is_indexed = h.columns[i].is_indexed;
+        c.is_unique = h.columns[i].is_unique;
+        c.is_autoincrement = h.columns[i].is_autoincrement;
+        if (h.columns[i].has_default) {
+            Value dv{};
+            dv.is_null = false;
+            if (h.columns[i].type == 0) {
+                dv.data = static_cast<int>(h.columns[i].default_int);
+            } else {
+                try {
+                    dv.data = string_pool->get(h.columns[i].default_string_id);
+                } catch (...) {
+                    dv.data = static_cast<int>(h.columns[i].default_string_id);
+                }
+            }
+            c.default_value = std::move(dv);
+        }
         s.push_back(c);
     }
 
@@ -1818,36 +1978,71 @@ std::string Engine::select_full_scan(
         }
     }
 
+    apply_group_by_rows(res, plan.group_by_column);
+    apply_order_by_rows(res, plan);
     return res.dump(4);
 }
 
 std::string Engine::select_with_aggregates(const fs::path& db_dir, const QueryPlan& plan, const Schema& schema,
     const TableHeader& h, const ExecutionPlan& exec_plan) {
-    // Подготовка агрегатных результатов
-    std::vector<AggregateResult> agg_results;
-    std::vector<size_t> agg_column_indices;  // Индексы колонок в схеме для агрегации
+    struct AggregateState {
+        AggregateType type = AggregateType::NONE;
+        bool count_star = false;
+        int64_t count = 0;
+        int64_t non_null_count = 0;
+        int64_t sum = 0;
+        bool has_extreme = false;
+        json min_value = nullptr;
+        json max_value = nullptr;
+    };
 
-    for (size_t i = 0; i < plan.select_targets.size(); ++i) {
-        const auto& col = plan.select_targets[i];
-        if (col.aggregate != AggregateType::NONE) {
-            agg_results.emplace_back();
-            agg_results.back().reset(static_cast<dbms::AggregateType>(col.aggregate));
+    struct GroupBucket {
+        json group_value = nullptr;
+        std::vector<AggregateState> states;
+    };
 
-            // Находим индекс колонки в схеме
-            int col_idx = -1;
-            for (size_t j = 0; j < schema.size(); ++j) {
-                if (schema[j].name == col.column_name || col.column_name == "*") {
-                    col_idx = static_cast<int>(j);
-                    break;
-                }
-            }
-            agg_column_indices.push_back(col_idx >= 0 ? static_cast<size_t>(col_idx) : 0);
+    auto col_index = build_column_index(schema);
+    bool has_aggregates = false;
+    for (const auto& target : plan.select_targets) {
+        if (target.aggregate != AggregateType::NONE) {
+            has_aggregates = true;
         }
     }
 
-    // Получаем данные (через индекс или full scan)
-    std::vector<json> matching_rows;
+    if (!has_aggregates) {
+        throw std::runtime_error("Aggregate execution path requires aggregate functions");
+    }
 
+    if (!plan.group_by_column.empty() && col_index.find(plan.group_by_column) == col_index.end()) {
+        throw std::runtime_error("Unknown GROUP BY column: " + plan.group_by_column);
+    }
+
+    for (const auto& target : plan.select_targets) {
+        if (target.aggregate == AggregateType::NONE) {
+            if (target.column_name == "*") {
+                throw std::runtime_error("SELECT * cannot be mixed with aggregate functions");
+            }
+            if (col_index.find(target.column_name) == col_index.end()) {
+                throw std::runtime_error("Unknown column in SELECT: " + target.column_name);
+            }
+            if (plan.group_by_column.empty()) {
+                throw std::runtime_error("Non-aggregated columns require GROUP BY");
+            }
+            if (target.column_name != plan.group_by_column) {
+                throw std::runtime_error("Column '" + target.column_name + "' must be in GROUP BY");
+            }
+            continue;
+        }
+
+        if (target.column_name == "*" && target.aggregate != AggregateType::COUNT) {
+            throw std::runtime_error("Only COUNT(*) is supported with '*'");
+        }
+        if (target.column_name != "*" && col_index.find(target.column_name) == col_index.end()) {
+            throw std::runtime_error("Unknown aggregate column: " + target.column_name);
+        }
+    }
+
+    std::vector<json> matching_rows;
     if (exec_plan.strategy == ExecutionStrategy::INDEX_SEEK ||
         exec_plan.strategy == ExecutionStrategy::INDEX_RANGE_SCAN) {
         std::vector<RID> matching_rids = execute_indexed_select(plan.table_name, exec_plan);
@@ -1865,17 +2060,14 @@ std::string Engine::select_with_aggregates(const fs::path& db_dir, const QueryPl
                     is_live_record_layout(rid.offset, *reinterpret_cast<uint32_t*>(buf.data()), rh)) {
                     size_t d_off = rid.offset + sizeof(RecordHeader);
                     auto row = RowDeserializer::deserialize(schema, buf.data(), d_off, string_pool.get());
-
                     if (!plan.where_clause || ConditionEvaluator::evaluate(row, plan.where_clause.get())) {
-                        matching_rows.push_back(row);
+                        matching_rows.push_back(std::move(row));
                     }
                 }
             }
         }
     } else {
-        // Full scan
         Pager tbl_p((db_dir / (plan.table_name + ".tbl")).string());
-
         for (uint32_t i = 0; i <= h.last_data_page; ++i) {
             std::vector<char> buf(PAGE_SIZE, 0);
             tbl_p.read_page(i, buf.data());
@@ -1893,7 +2085,7 @@ std::string Engine::select_with_aggregates(const fs::path& db_dir, const QueryPl
                 if (!rh->is_deleted) {
                     auto row = RowDeserializer::deserialize(schema, buf.data(), data_off, string_pool.get());
                     if (!plan.where_clause || ConditionEvaluator::evaluate(row, plan.where_clause.get())) {
-                        matching_rows.push_back(row);
+                        matching_rows.push_back(std::move(row));
                     }
                 }
 
@@ -1902,69 +2094,147 @@ std::string Engine::select_with_aggregates(const fs::path& db_dir, const QueryPl
         }
     }
 
-    // Вычисляем агрегаты
-    for (size_t i = 0; i < agg_results.size(); ++i) {
-        size_t schema_idx = agg_column_indices[i];
-        const std::string& col_name = schema[schema_idx].name;
+    auto make_bucket = [&]() {
+        GroupBucket bucket;
+        bucket.states.reserve(plan.select_targets.size());
+        for (const auto& target : plan.select_targets) {
+            AggregateState state;
+            state.type = target.aggregate;
+            state.count_star = (target.aggregate == AggregateType::COUNT && target.column_name == "*");
+            bucket.states.push_back(std::move(state));
+        }
+        return bucket;
+    };
 
-        for (const auto& row : matching_rows) {
-            std::variant<std::monostate, int64_t, std::string> val;
+    std::vector<GroupBucket> groups;
+    std::unordered_map<std::string, size_t> group_positions;
+    groups.reserve(plan.group_by_column.empty() ? 1 : matching_rows.size());
+    group_positions.reserve(plan.group_by_column.empty() ? 1 : matching_rows.size());
 
-            if (row.contains(col_name)) {
-                const auto& cell = row.at(col_name);
-                if (cell.is_null()) {
-                    val = std::monostate{};
-                } else if (cell.is_number_integer()) {
-                    val = cell.get<int64_t>();
-                } else if (cell.is_string()) {
-                    val = cell.get<std::string>();
-                } else {
-                    val = std::monostate{};
-                }
-            } else {
-                val = std::monostate{};
+    auto ensure_group_for_row = [&](const json& row) -> GroupBucket& {
+        json group_value = nullptr;
+        std::string group_key = "__all__";
+
+        if (!plan.group_by_column.empty()) {
+            if (!row.contains(plan.group_by_column)) {
+                throw std::runtime_error("Unknown GROUP BY column: " + plan.group_by_column);
+            }
+            group_value = row.at(plan.group_by_column);
+            group_key = group_value.dump();
+        }
+
+        auto it = group_positions.find(group_key);
+        if (it != group_positions.end()) {
+            return groups[it->second];
+        }
+
+        GroupBucket bucket = make_bucket();
+        bucket.group_value = std::move(group_value);
+        groups.push_back(std::move(bucket));
+        const size_t idx = groups.size() - 1;
+        group_positions.emplace(group_key, idx);
+        return groups[idx];
+    };
+
+    for (const auto& row : matching_rows) {
+        GroupBucket& group = ensure_group_for_row(row);
+        for (size_t i = 0; i < plan.select_targets.size(); ++i) {
+            const auto& target = plan.select_targets[i];
+            auto& state = group.states[i];
+
+            if (target.aggregate == AggregateType::NONE) continue;
+
+            if (state.count_star) {
+                state.count++;
+                continue;
             }
 
-            agg_results[i].accumulate(val);
+            const json cell = row.contains(target.column_name) ? row.at(target.column_name) : json(nullptr);
+            if (cell.is_null()) continue;
+
+            switch (target.aggregate) {
+                case AggregateType::COUNT:
+                    state.count++;
+                    break;
+                case AggregateType::SUM:
+                case AggregateType::AVG:
+                    if (!cell.is_number_integer()) {
+                        throw std::runtime_error(target.column_name + " must be numeric for " +
+                                                 query_aggregate_name(target.aggregate));
+                    }
+                    state.sum += cell.get<int64_t>();
+                    state.non_null_count++;
+                    break;
+                case AggregateType::MIN:
+                    if (!state.has_extreme || compare_json_for_order(cell, state.min_value) < 0) {
+                        state.min_value = cell;
+                        state.has_extreme = true;
+                    }
+                    break;
+                case AggregateType::MAX:
+                    if (!state.has_extreme || compare_json_for_order(cell, state.max_value) > 0) {
+                        state.max_value = cell;
+                        state.has_extreme = true;
+                    }
+                    break;
+                default:
+                    break;
+            }
         }
     }
 
-    // Формируем результат
-    json result_row;
-    for (size_t i = 0; i < plan.select_targets.size(); ++i) {
-        const auto& col = plan.select_targets[i];
-        std::string output_name =
-            col.alias.empty() ? (col.aggregate != AggregateType::NONE
-                                        ? aggregate_type_to_string(static_cast<dbms::AggregateType>(col.aggregate)) +
-                                              "(" + col.column_name + ")"
-                                        : col.column_name)
-                              : col.alias;
-
-        if (col.aggregate != AggregateType::NONE) {
-            // Находим соответствующий результат агрегации
-            int agg_idx = -1;
-            for (size_t j = 0; j < agg_results.size(); ++j) {
-                if (plan.select_targets[j].column_name == col.column_name &&
-                    plan.select_targets[j].aggregate == col.aggregate) {
-                    agg_idx = static_cast<int>(j);
-                    break;
-                }
-            }
-
-            if (agg_idx >= 0) {
-                auto final_val = agg_results[agg_idx].get_final_value();
-                if (std::holds_alternative<int64_t>(final_val)) {
-                    result_row[output_name] = std::get<int64_t>(final_val);
-                } else if (std::holds_alternative<double>(final_val)) {
-                    result_row[output_name] = std::get<double>(final_val);
-                } else {
-                    result_row[output_name] = nullptr;
-                }
-            }
-        }
+    if (groups.empty() && plan.group_by_column.empty()) {
+        groups.push_back(make_bucket());
     }
 
     json res = json::array();
-    res.push_back(result_row);
+    for (const auto& group : groups) {
+        json out_row = json::object();
+
+        for (size_t i = 0; i < plan.select_targets.size(); ++i) {
+            const auto& target = plan.select_targets[i];
+            const auto& state = group.states[i];
+            const std::string output_name = target.alias.empty()
+                                                ? (target.aggregate != AggregateType::NONE
+                                                       ? query_aggregate_name(target.aggregate) + "(" +
+                                                             target.column_name + ")"
+                                                       : target.column_name)
+                                                : target.alias;
+
+            if (target.aggregate == AggregateType::NONE) {
+                out_row[output_name] = group.group_value;
+                continue;
+            }
+
+            switch (target.aggregate) {
+                case AggregateType::COUNT:
+                    out_row[output_name] = state.count;
+                    break;
+                case AggregateType::SUM:
+                    out_row[output_name] = (state.non_null_count == 0 ? json(nullptr) : json(state.sum));
+                    break;
+                case AggregateType::AVG:
+                    if (state.non_null_count == 0) {
+                        out_row[output_name] = nullptr;
+                    } else {
+                        out_row[output_name] = static_cast<double>(state.sum) / static_cast<double>(state.non_null_count);
+                    }
+                    break;
+                case AggregateType::MIN:
+                    out_row[output_name] = state.has_extreme ? state.min_value : json(nullptr);
+                    break;
+                case AggregateType::MAX:
+                    out_row[output_name] = state.has_extreme ? state.max_value : json(nullptr);
+                    break;
+                default:
+                    out_row[output_name] = nullptr;
+                    break;
+            }
+        }
+
+        res.push_back(std::move(out_row));
+    }
+
+    apply_order_by_rows(res, plan);
     return res.dump(4);
 }

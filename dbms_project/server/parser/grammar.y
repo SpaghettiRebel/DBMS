@@ -8,10 +8,25 @@ struct AssignmentList {
     std::vector<std::string> columns;
     std::vector<Value> values;
 };
+
+struct OrderByClause {
+    bool has_value = false;
+    std::string column_name;
+    bool descending = false;
+};
+
+struct ColumnModifiers {
+    bool is_not_null = false;
+    bool is_indexed = false;
+    bool is_unique = false;
+    bool is_autoincrement = false;
+    std::optional<Value> default_value;
+};
 }
 
 %{
 #include <cstdlib>
+#include <cstring>
 #include <memory>
 #include <string>
 #include <utility>
@@ -27,9 +42,6 @@ int yylex(void);
 void yyerror(const char* s);
 
 namespace {
-
-constexpr int COLUMN_FLAG_NOT_NULL = 1;
-constexpr int COLUMN_FLAG_INDEXED = 2;
 
 std::string take_string(char* value) {
     std::string result = value != nullptr ? value : "";
@@ -48,6 +60,26 @@ Value make_string_value(char* value) {
     Value result{};
     result.is_null = false;
     result.data = take_string(value);
+    return result;
+}
+
+char* make_owned_c_string(const char* text) {
+    if (text == nullptr) {
+        return nullptr;
+    }
+    const std::size_t length = std::strlen(text);
+    char* copy = static_cast<char*>(std::malloc(length + 1));
+    if (copy == nullptr) {
+        return nullptr;
+    }
+    std::memcpy(copy, text, length + 1);
+    return copy;
+}
+
+Value make_null_value() {
+    Value result{};
+    result.is_null = true;
+    result.data = 0;
     return result;
 }
 
@@ -92,6 +124,16 @@ SelectTarget make_select_target(char* column_name, char* alias) {
     return target;
 }
 
+SelectTarget make_aggregate_target(AggregateType aggregate, char* column_name, char* alias) {
+    SelectTarget target{};
+    target.column_name = take_string(column_name);
+    target.aggregate = aggregate;
+    if (alias != nullptr) {
+        target.alias = take_string(alias);
+    }
+    return target;
+}
+
 }  // namespace
 %}
 
@@ -109,10 +151,14 @@ SelectTarget make_select_target(char* column_name, char* alias) {
     SelectTarget* select_target;
     std::vector<SelectTarget>* select_target_list;
     AssignmentList* assignment_list;
+    OrderByClause* order_by;
+    ColumnModifiers* column_modifiers;
 }
 
-%token SELECT USE FROM WHERE INSERT INTO VALUES CREATE TABLE DATABASE INT TEXT
-%token DROP UPDATE SET DELETE AS BETWEEN LIKE AND OR NOT NULL_T INDEXED
+%token SELECT SUM MIN MAX AVG COUNT GROUP BY ORDER ASC DESC
+%token USE FROM WHERE INSERT INTO VALUES CREATE TABLE DATABASE INT TEXT
+%token DROP UPDATE SET DELETE AS BETWEEN LIKE AND OR NOT TOK_NULL INDEXED
+%token DEFAULT UNIQUE AUTO_INCREMENT
 %token EQEQ NEQ LEQ GEQ
 %token <str> ID STRING_LITERAL
 %token <int_value> INT_LITERAL
@@ -126,12 +172,15 @@ SelectTarget make_select_target(char* column_name, char* alias) {
 %type <column> column_def
 %type <column_list> column_defs
 %type <condition> opt_where condition predicate
-%type <int_value> column_type column_modifiers
+%type <int_value> column_type aggregate_func opt_order_direction
 %type <op_type> comparison_operator
 %type <assignment_list> assignment_list
+%type <str> opt_alias opt_group_by
+%type <order_by> opt_order_by
+%type <column_modifiers> column_modifiers
 
 %destructor { std::free($$); } <str>
-%destructor { delete $$; } <value> <string_list> <value_list> <value_rows> <column> <column_list> <condition> <select_target> <select_target_list> <assignment_list>
+%destructor { delete $$; } <value> <string_list> <value_list> <value_rows> <column> <column_list> <condition> <select_target> <select_target_list> <assignment_list> <order_by> <column_modifiers>
 
 %left OR
 %left AND
@@ -165,14 +214,22 @@ use_stmt
     ;
 
 select_stmt
-    : SELECT select_list FROM ID opt_where
+    : SELECT select_list FROM ID opt_where opt_group_by opt_order_by
       {
           reset_parsed_query_plan();
           parsed_query_plan.type = QueryType::SELECT;
           parsed_query_plan.table_name = take_string($4);
           parsed_query_plan.select_targets = std::move(*$2);
           parsed_query_plan.where_clause.reset($5);
+          if ($6 != nullptr) {
+              parsed_query_plan.group_by_column = take_string($6);
+          }
+          if ($7 != nullptr && $7->has_value) {
+              parsed_query_plan.order_by_column = $7->column_name;
+              parsed_query_plan.order_descending = $7->descending;
+          }
           delete $2;
+          delete $7;
       }
     ;
 
@@ -211,9 +268,91 @@ select_target
       {
           $$ = new SelectTarget(make_select_target($1, nullptr));
       }
-    | ID AS ID
+    | ID opt_alias
       {
-          $$ = new SelectTarget(make_select_target($1, $3));
+          $$ = new SelectTarget(make_select_target($1, $2));
+      }
+    | aggregate_func '(' ID ')' opt_alias
+      {
+          $$ = new SelectTarget(make_aggregate_target(static_cast<AggregateType>($1), $3, $5));
+      }
+    | COUNT '(' '*' ')' opt_alias
+      {
+          $$ = new SelectTarget(make_aggregate_target(AggregateType::COUNT, make_owned_c_string("*"), $5));
+      }
+    ;
+
+aggregate_func
+    : SUM
+      {
+          $$ = static_cast<int>(AggregateType::SUM);
+      }
+    | MIN
+      {
+          $$ = static_cast<int>(AggregateType::MIN);
+      }
+    | MAX
+      {
+          $$ = static_cast<int>(AggregateType::MAX);
+      }
+    | AVG
+      {
+          $$ = static_cast<int>(AggregateType::AVG);
+      }
+    | COUNT
+      {
+          $$ = static_cast<int>(AggregateType::COUNT);
+      }
+    ;
+
+opt_alias
+    : /* empty */
+      {
+          $$ = nullptr;
+      }
+    | AS ID
+      {
+          $$ = $2;
+      }
+    ;
+
+opt_group_by
+    : /* empty */
+      {
+          $$ = nullptr;
+      }
+    | GROUP BY ID
+      {
+          $$ = $3;
+      }
+    ;
+
+opt_order_direction
+    : /* empty */
+      {
+          $$ = 0;
+      }
+    | ASC
+      {
+          $$ = 0;
+      }
+    | DESC
+      {
+          $$ = 1;
+      }
+    ;
+
+opt_order_by
+    : /* empty */
+      {
+          $$ = new OrderByClause();
+      }
+    | ORDER BY ID opt_order_direction
+      {
+          $$ = new OrderByClause();
+          $$->has_value = true;
+          $$->column_name = take_string($3);
+          $$->descending = ($4 != 0);
       }
     ;
 
@@ -301,6 +440,10 @@ literal
     | STRING_LITERAL
       {
           $$ = new Value(make_string_value($1));
+      }
+    | TOK_NULL
+      {
+          $$ = new Value(make_null_value());
       }
     ;
 
@@ -476,15 +619,34 @@ column_type
 column_modifiers
     : /* empty */
       {
-          $$ = 0;
+          $$ = new ColumnModifiers{};
       }
-    | column_modifiers NOT NULL_T
+    | column_modifiers NOT TOK_NULL
       {
-          $$ = $1 | COLUMN_FLAG_NOT_NULL;
+          $1->is_not_null = true;
+          $$ = $1;
       }
     | column_modifiers INDEXED
       {
-          $$ = $1 | COLUMN_FLAG_INDEXED;
+          $1->is_indexed = true;
+          $$ = $1;
+      }
+    | column_modifiers UNIQUE
+      {
+          $1->is_unique = true;
+          $$ = $1;
+      }
+    | column_modifiers DEFAULT literal
+      {
+          $1->default_value = std::move(*$3);
+          delete $3;
+          $$ = $1;
+      }
+    | column_modifiers AUTO_INCREMENT
+      {
+          $1->is_autoincrement = true;
+          $1->is_not_null = true;
+          $$ = $1;
       }
     ;
 
@@ -494,8 +656,15 @@ column_def
           $$ = new ColumnDef{};
           $$->name = take_string($1);
           $$->type = ($2 == 0 ? DataType::INT : DataType::STRING);
-          $$->is_not_null = (($3 & COLUMN_FLAG_NOT_NULL) != 0);
-          $$->is_indexed = (($3 & COLUMN_FLAG_INDEXED) != 0);
+          $$->is_not_null = $3->is_not_null;
+          $$->is_indexed = $3->is_indexed || $3->is_unique;
+          $$->default_value = $3->default_value;
+          $$->is_unique = $3->is_unique;
+          $$->is_autoincrement = $3->is_autoincrement;
+          if ($$->is_autoincrement && $$->type != DataType::INT) {
+              yyerror("AUTO_INCREMENT allowed only for INT columns");
+          }
+          delete $3;
       }
     ;
 

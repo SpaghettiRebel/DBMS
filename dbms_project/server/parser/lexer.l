@@ -42,6 +42,16 @@ INT_LITERAL_RE  {DIGIT}+
 STRING_LITERAL_RE \'([^\\\n']|\\.)*\'
 
 KW_SELECT       [Ss][Ee][Ll][Ee][Cc][Tt]
+KW_SUM          [Ss][Uu][Mm]
+KW_MIN          [Mm][Ii][Nn]
+KW_MAX          [Mm][Aa][Xx]
+KW_AVG          [Aa][Vv][Gg]
+KW_COUNT        [Cc][Oo][Uu][Nn][Tt]
+KW_GROUP        [Gg][Rr][Oo][Uu][Pp]
+KW_BY           [Bb][Yy]
+KW_ORDER        [Oo][Rr][Dd][Ee][Rr]
+KW_ASC          [Aa][Ss][Cc]
+KW_DESC         [Dd][Ee][Ss][Cc]
 KW_USE          [Uu][Ss][Ee]
 KW_FROM         [Ff][Rr][Oo][Mm]
 KW_WHERE        [Ww][Hh][Ee][Rr][Ee]
@@ -64,6 +74,9 @@ KW_OR           [Oo][Rr]
 KW_NOT          [Nn][Oo][Tt]
 KW_NULL         [Nn][Uu][Ll][Ll]
 KW_INDEXED      [Ii][Nn][Dd][Ee][Xx][Ee][Dd]
+KW_DEFAULT      [Dd][Ee][Ff][Aa][Uu][Ll][Tt]
+KW_UNIQUE       [Uu][Nn][Ii][Qq][Uu][Ee]
+KW_AUTO_INCREMENT [Aa][Uu][Tt][Oo]_[Ii][Nn][Cc][Rr][Ee][Mm][Ee][Nn][Tt]
 KW_INT          [Ii][Nn][Tt]
 KW_TEXT         [Tt][Ee][Xx][Tt]
 
@@ -72,6 +85,16 @@ KW_TEXT         [Tt][Ee][Xx][Tt]
 {WS}            { /* skip whitespace */ }
 
 {KW_SELECT}     { return SELECT; }
+{KW_SUM}        { return SUM; }
+{KW_MIN}        { return MIN; }
+{KW_MAX}        { return MAX; }
+{KW_AVG}        { return AVG; }
+{KW_COUNT}      { return COUNT; }
+{KW_GROUP}      { return GROUP; }
+{KW_BY}         { return BY; }
+{KW_ORDER}      { return ORDER; }
+{KW_ASC}        { return ASC; }
+{KW_DESC}       { return DESC; }
 {KW_USE}        { return USE; }
 {KW_FROM}       { return FROM; }
 {KW_WHERE}      { return WHERE; }
@@ -92,8 +115,11 @@ KW_TEXT         [Tt][Ee][Xx][Tt]
 {KW_AND}        { return AND; }
 {KW_OR}         { return OR; }
 {KW_NOT}        { return NOT; }
-{KW_NULL}       { return NULL_T; }
+{KW_NULL}       { return TOK_NULL; }
 {KW_INDEXED}    { return INDEXED; }
+{KW_DEFAULT}    { return DEFAULT; }
+{KW_UNIQUE}     { return UNIQUE; }
+{KW_AUTO_INCREMENT} { return AUTO_INCREMENT; }
 {KW_INT}        { return INT; }
 {KW_TEXT}       { return TEXT; }
 
