@@ -49,13 +49,17 @@ QueryOptimizer::QueryOptimizer(const std::string& db_root_path)
     : db_root_(db_root_path) {}
 
 bool QueryOptimizer::has_index(const std::string& table_name, const std::string& column_name) const {
+    // В текущей архитектуре индексный файл общий для всей таблицы (.idx).
+    // Наличие индекса для конкретной колонки определяется схемой таблицы (флаг is_indexed),
+    // а не существованием отдельного файла. Эта проверка уже выполняется в collect_candidates.
+    // Данный метод оставлен для совместимости и всегда возвращает true, если файл индекса таблицы существует.
     std::string index_file = get_index_path(table_name, column_name);
     return fs::exists(index_file);
 }
 
-std::string QueryOptimizer::get_index_path(const std::string& table_name, const std::string& column_name) const {
-    // Формат: root/db_name/table_name.idx.column_name
-    // Для упрощения предполагаем, что table_name уже содержит путь или мы в контексте БД
+std::string QueryOptimizer::get_index_path(const std::string& table_name, const std::string& /*column_name*/) const {
+    // Формат: root/db_name/table_name.idx
+    // Индексный файл общий для всей таблицы, содержит корни B-деревьев для всех индексированных колонок
     size_t dot_pos = table_name.find('.');
     std::string db_name, tbl_name;
     
@@ -69,7 +73,7 @@ std::string QueryOptimizer::get_index_path(const std::string& table_name, const 
         db_name = "default"; 
     }
 
-    return db_root_ + "/" + db_name + "/" + tbl_name + ".idx." + column_name;
+    return db_root_ + "/" + db_name + "/" + tbl_name + ".idx";
 }
 
 ExecutionPlan QueryOptimizer::analyze(const std::string& table_name, 
@@ -104,9 +108,12 @@ ExecutionPlan QueryOptimizer::analyze(const std::string& table_name,
 
     const IndexCandidate& best = *best_it;
 
-    // Проверяем, существует ли физический файл индекса
+    // Проверяем, существует ли физический файл индекса таблицы.
+    // В текущей архитектуре файл .idx общий для всей таблицы и содержит
+    // корни B-деревьев для всех индексированных колонок. Проверка has_index
+    // теперь проверяет существование этого общего файла.
     if (!has_index(best.table_name, best.column_name)) {
-        return plan; // Индекс декларирован, но файла нет (или ошибка)
+        return plan; // Файл индекса таблицы не найден
     }
 
     // Формируем план использования индекса
