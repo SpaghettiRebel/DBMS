@@ -48,14 +48,19 @@ namespace {
 QueryOptimizer::QueryOptimizer(const std::string& db_root_path) 
     : db_root_(db_root_path) {}
 
+void QueryOptimizer::set_current_db(const std::string& db_name) {
+    current_db_ = db_name;
+}
+
 bool QueryOptimizer::has_index(const std::string& table_name, const std::string& column_name) const {
     std::string index_file = get_index_path(table_name, column_name);
-    return fs::exists(index_file);
+    return !index_file.empty() && fs::exists(index_file);
 }
 
 std::string QueryOptimizer::get_index_path(const std::string& table_name, const std::string& column_name) const {
-    // Формат: root/db_name/table_name.idx.column_name
-    // Для упрощения предполагаем, что table_name уже содержит путь или мы в контексте БД
+    (void)column_name;
+
+    // Физически индекс хранится единым файлом table_name.idx внутри БД.
     size_t dot_pos = table_name.find('.');
     std::string db_name, tbl_name;
     
@@ -63,13 +68,15 @@ std::string QueryOptimizer::get_index_path(const std::string& table_name, const 
         db_name = table_name.substr(0, dot_pos);
         tbl_name = table_name.substr(dot_pos + 1);
     } else {
-        // Если база не указана, используем текущую (упрощенно)
         tbl_name = table_name;
-        // В реальном приложении нужно брать текущую БД из контекста
-        db_name = "default"; 
+        db_name = current_db_;
     }
 
-    return db_root_ + "/" + db_name + "/" + tbl_name + ".idx." + column_name;
+    if (db_name.empty() || tbl_name.empty()) {
+        return {};
+    }
+
+    return db_root_ + "/" + db_name + "/" + tbl_name + ".idx";
 }
 
 ExecutionPlan QueryOptimizer::analyze(const std::string& table_name, 

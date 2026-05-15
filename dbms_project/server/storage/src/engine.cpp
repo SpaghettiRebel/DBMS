@@ -14,6 +14,7 @@
 #include <stdexcept>
 #include <unordered_map>
 #include <unordered_set>
+#include <utility>
 
 #include "../include/serializer.h"
 
@@ -30,6 +31,40 @@ struct RecordHeader {
 };
 
 bool same_pos(const pos_t& a, const pos_t& b) { return a.page_id == b.page_id && a.offset == b.offset; }
+
+std::pair<std::string, std::string> split_table_reference(const std::string& table_ref) {
+    const size_t first_dot = table_ref.find('.');
+    if (first_dot == std::string::npos) {
+        return {"", table_ref};
+    }
+
+    if (table_ref.find('.', first_dot + 1) != std::string::npos) {
+        throw std::runtime_error("Invalid table reference: " + table_ref);
+    }
+
+    const std::string db_name = table_ref.substr(0, first_dot);
+    const std::string table_name = table_ref.substr(first_dot + 1);
+    if (db_name.empty() || table_name.empty()) {
+        throw std::runtime_error("Invalid table reference: " + table_ref);
+    }
+
+    return {db_name, table_name};
+}
+
+bool query_uses_table_reference(QueryType type) {
+    switch (type) {
+        case QueryType::CREATE_TABLE:
+        case QueryType::DROP_TABLE:
+        case QueryType::INSERT:
+        case QueryType::UPDATE:
+        case QueryType::DELETE:
+        case QueryType::SELECT:
+        case QueryType::REVERT:
+            return true;
+        default:
+            return false;
+    }
+}
 
 bool is_live_record_layout(size_t off, uint32_t end_off, const RecordHeader* rh) {
     if (!rh) return false;
@@ -666,6 +701,7 @@ Engine::Engine(std::string root) : root_path(std::move(root)) {
 
     // Инициализация оптимизатора запросов
     query_optimizer = std::make_unique<QueryOptimizer>(root_path);
+    query_optimizer->set_current_db(current_db);
 
     // Восстановление из WAL при старте системы
     recover_from_wal();
@@ -756,41 +792,79 @@ void Engine::use_database(const std::string& name) {
     current_db = name;
     string_pool = std::make_unique<StringPool>((db_path / "strings.dat").string());
     journal = std::make_unique<Journal>((db_path / "journal.dat").string());
+    query_optimizer->set_current_db(current_db);
 }
 
 void Engine::execute(const QueryPlan& plan) {
-    switch (plan.type) {
-        case QueryType::CREATE_DATABASE:
-            create_database(plan.database_name);
-            break;
-        case QueryType::DROP_DATABASE:
-            drop_database(plan.database_name);
-            break;
-        case QueryType::USE_DATABASE:
-            use_database(plan.database_name);
-            break;
-        case QueryType::CREATE_TABLE:
-            create_table(plan);
-            break;
-        case QueryType::DROP_TABLE:
-            drop_table(plan.table_name);
-            break;
-        case QueryType::INSERT:
-            insert_record(plan);
-            break;
-        case QueryType::SELECT:
-            std::cout << select_records(plan) << std::endl;
-            break;
-        case QueryType::REVERT:
-            revert(plan.table_name, plan.timestamp);
-            break;
-        case QueryType::UPDATE:
-            update_records(plan);
-            break;
-        case QueryType::DELETE:
-            delete_records(plan);
-            break;
+    const std::string previous_db = current_db;
+    bool switched_db = false;
+
+    if (query_uses_table_reference(plan.type)) {
+        const auto [target_db, target_table] = split_table_reference(plan.table_name);
+        if (target_table.empty()) {
+            throw std::runtime_error("Empty table name");
+        }
+
+        if (!target_db.empty() && target_db != current_db) {
+            use_database(target_db);
+            switched_db = true;
+        }
     }
+
+    auto restore_database_context = [&]() {
+        if (!switched_db) return;
+        if (previous_db.empty()) {
+            current_db.clear();
+            string_pool.reset();
+            journal.reset();
+            query_optimizer->set_current_db(current_db);
+            return;
+        }
+        use_database(previous_db);
+    };
+
+    try {
+        switch (plan.type) {
+            case QueryType::CREATE_DATABASE:
+                create_database(plan.database_name);
+                break;
+            case QueryType::DROP_DATABASE:
+                drop_database(plan.database_name);
+                break;
+            case QueryType::USE_DATABASE:
+                use_database(plan.database_name);
+                break;
+            case QueryType::CREATE_TABLE:
+                create_table(plan);
+                break;
+            case QueryType::DROP_TABLE:
+                drop_table(plan.table_name);
+                break;
+            case QueryType::INSERT:
+                insert_record(plan);
+                break;
+            case QueryType::SELECT:
+                // SELECT results are fetched via select_records() by the caller.
+                break;
+            case QueryType::REVERT:
+                revert(plan.table_name, plan.timestamp);
+                break;
+            case QueryType::UPDATE:
+                update_records(plan);
+                break;
+            case QueryType::DELETE:
+                delete_records(plan);
+                break;
+        }
+    } catch (...) {
+        try {
+            restore_database_context();
+        } catch (...) {
+        }
+        throw;
+    }
+
+    restore_database_context();
 }
 
 void Engine::create_database(const std::string& name) {
@@ -812,16 +886,21 @@ void Engine::drop_database(const std::string& name) {
         current_db.clear();
         string_pool.reset();
         journal.reset();
+        query_optimizer->set_current_db(current_db);
     }
 }
 
 void Engine::create_table(const QueryPlan& plan) {
     if (current_db.empty()) throw std::runtime_error("No active DB");
 
+    const auto [db_name_unused, table_name] = split_table_reference(plan.table_name);
+    (void)db_name_unused;
+    if (table_name.empty()) throw std::runtime_error("Empty table name");
+
     fs::path db_dir = fs::path(root_path) / current_db;
-    fs::path meta_path = db_dir / (plan.table_name + ".meta");
-    fs::path tbl_path = db_dir / (plan.table_name + ".tbl");
-    fs::path idx_path = db_dir / (plan.table_name + ".idx");
+    fs::path meta_path = db_dir / (table_name + ".meta");
+    fs::path tbl_path = db_dir / (table_name + ".tbl");
+    fs::path idx_path = db_dir / (table_name + ".idx");
 
     if (fs::exists(meta_path) || fs::exists(tbl_path) || fs::exists(idx_path)) {
         throw std::runtime_error("Table already exists");
@@ -851,6 +930,11 @@ void Engine::create_table(const QueryPlan& plan) {
         h.columns[i].is_unique = plan.columns[i].is_unique;
         h.columns[i].is_autoincrement = plan.columns[i].is_autoincrement;
         h.columns[i].next_autoincrement_value = 1;
+
+        if (h.columns[i].is_indexed) {
+            h.columns[i].is_unique = true;
+            h.columns[i].is_not_null = true;
+        }
 
         if (h.columns[i].is_unique) {
             h.columns[i].is_indexed = true;
@@ -896,10 +980,14 @@ void Engine::create_table(const QueryPlan& plan) {
 void Engine::drop_table(const std::string& table_name) {
     if (current_db.empty()) throw std::runtime_error("No active DB");
 
+    const auto [db_name_unused, local_table_name] = split_table_reference(table_name);
+    (void)db_name_unused;
+    if (local_table_name.empty()) throw std::runtime_error("Empty table name");
+
     fs::path db_dir = fs::path(root_path) / current_db;
-    fs::path tbl = db_dir / (table_name + ".tbl");
-    fs::path meta = db_dir / (table_name + ".meta");
-    fs::path idx = db_dir / (table_name + ".idx");
+    fs::path tbl = db_dir / (local_table_name + ".tbl");
+    fs::path meta = db_dir / (local_table_name + ".meta");
+    fs::path idx = db_dir / (local_table_name + ".idx");
 
     auto remove_required = [](const fs::path& p) {
         if (fs::exists(p) && !fs::remove(p)) {
@@ -927,13 +1015,17 @@ void Engine::insert_record(const QueryPlan& plan) {
 
     if (current_db.empty()) throw std::runtime_error("No active DB");
 
+    const auto [db_name_unused, table_name] = split_table_reference(plan.table_name);
+    (void)db_name_unused;
+    if (table_name.empty()) throw std::runtime_error("Empty table name");
+
     fs::path db_dir = fs::path(root_path) / current_db;
-    const std::string meta_path = (db_dir / (plan.table_name + ".meta")).string();
-    const std::string tbl_path = (db_dir / (plan.table_name + ".tbl")).string();
-    const std::string idx_path = (db_dir / (plan.table_name + ".idx")).string();
+    const std::string meta_path = (db_dir / (table_name + ".meta")).string();
+    const std::string tbl_path = (db_dir / (table_name + ".tbl")).string();
+    const std::string idx_path = (db_dir / (table_name + ".idx")).string();
 
     auto h = load_metadata_checked(meta_path);
-    auto schema = get_table_schema(plan.table_name);
+    auto schema = get_table_schema(table_name);
 
     std::vector<Value> values;
     build_insert_values(plan, schema, h, string_pool.get(), values);
@@ -1010,7 +1102,7 @@ void Engine::insert_record(const QueryPlan& plan) {
         // Логирование операции в WAL перед коммитом
         if (wal) {
             uint64_t txn_id = start_transaction();
-            log_operation_insert(txn_id, plan.table_name, record_pos, row_bin);
+            log_operation_insert(txn_id, table_name, record_pos, row_bin);
             commit_transaction(txn_id);
         }
 
@@ -1031,7 +1123,7 @@ void Engine::insert_record(const QueryPlan& plan) {
         save_metadata_atomic(meta_path, h);
 
         if (journal) {
-            JournalEntry je{JournalOp::INSERT, plan.table_name, get_now_timestamp(), record_pos, {}, row_bin};
+            JournalEntry je{JournalOp::INSERT, table_name, get_now_timestamp(), record_pos, {}, row_bin};
             journal->log(je);
         }
 
@@ -1060,78 +1152,115 @@ void Engine::insert_record(const QueryPlan& plan) {
 }
 
 std::string Engine::select_records(const QueryPlan& plan) {
+    const auto [target_db, table_name] = split_table_reference(plan.table_name);
+    if (table_name.empty()) throw std::runtime_error("Empty table name");
+
+    const std::string previous_db = current_db;
+    bool switched_db = false;
+
+    if (!target_db.empty() && target_db != current_db) {
+        use_database(target_db);
+        switched_db = true;
+    }
+
     if (current_db.empty()) throw std::runtime_error("No active DB");
 
-    fs::path db_dir = fs::path(root_path) / current_db;
-    auto h = load_metadata_checked((db_dir / (plan.table_name + ".meta")).string());
-    auto schema = get_table_schema(plan.table_name);
-
-    // Проверяем наличие агрегатных функций
-    bool has_aggregates = false;
-    for (const auto& col : plan.select_targets) {
-        if (col.aggregate != AggregateType::NONE) {
-            has_aggregates = true;
-            break;
+    auto restore_database_context = [&]() {
+        if (!switched_db) return;
+        if (previous_db.empty()) {
+            current_db.clear();
+            string_pool.reset();
+            journal.reset();
+            query_optimizer->set_current_db(current_db);
+            return;
         }
-    }
+        use_database(previous_db);
+    };
 
-    // Используем QueryOptimizer для выбора плана выполнения
-    ExecutionPlan exec_plan = query_optimizer->analyze(plan.table_name, plan.where_clause.get(), schema);
+    try {
+        fs::path db_dir = fs::path(root_path) / current_db;
+        auto h = load_metadata_checked((db_dir / (table_name + ".meta")).string());
+        auto schema = get_table_schema(table_name);
 
-    if (has_aggregates) {
-        // Обработка запроса с агрегатными функциями
-        return select_with_aggregates(db_dir, plan, schema, h, exec_plan);
-    }
-
-    json res = json::array();
-
-    if (exec_plan.strategy == ExecutionStrategy::INDEX_SEEK ||
-        exec_plan.strategy == ExecutionStrategy::INDEX_RANGE_SCAN) {
-        // Оптимизированный путь с использованием индекса
-        std::vector<RID> matching_rids = execute_indexed_select(plan.table_name, exec_plan);
-
-        Pager tbl_p((db_dir / (plan.table_name + ".tbl")).string());
-
-        for (const auto& rid : matching_rids) {
-            if (!is_valid_page_and_offset(rid)) continue;
-
-            std::vector<char> buf(PAGE_SIZE, 0);
-            tbl_p.read_page(rid.page_id, buf.data());
-
-            if (rid.offset + sizeof(RecordHeader) <= PAGE_SIZE) {
-                auto* rh = reinterpret_cast<RecordHeader*>(buf.data() + rid.offset);
-                if (!rh->is_deleted &&
-                    is_live_record_layout(rid.offset, *reinterpret_cast<uint32_t*>(buf.data()), rh)) {
-                    size_t d_off = rid.offset + sizeof(RecordHeader);
-                    auto row = RowDeserializer::deserialize(schema, buf.data(), d_off, string_pool.get());
-
-                    // Дополнительная фильтрация для сложных условий (AND/OR)
-                    if (!plan.where_clause || ConditionEvaluator::evaluate(row, plan.where_clause.get())) {
-                        res.push_back(row);
-                    }
-                }
+        // Проверяем наличие агрегатных функций
+        bool has_aggregates = false;
+        for (const auto& col : plan.select_targets) {
+            if (col.aggregate != AggregateType::NONE) {
+                has_aggregates = true;
+                break;
             }
         }
 
-        apply_group_by_rows(res, plan.group_by_column);
-        apply_order_by_rows(res, plan);
-        return res.dump(4);
-    } else {
-        // Полный сканирование таблицы (fallback)
-        return select_full_scan(db_dir, plan, schema, h);
+        // Используем QueryOptimizer для выбора плана выполнения
+        ExecutionPlan exec_plan = query_optimizer->analyze(table_name, plan.where_clause.get(), schema);
+
+        std::string result;
+        if (has_aggregates) {
+            // Обработка запроса с агрегатными функциями
+            result = select_with_aggregates(db_dir, plan, schema, h, exec_plan);
+        } else if (exec_plan.strategy == ExecutionStrategy::INDEX_SEEK ||
+                   exec_plan.strategy == ExecutionStrategy::INDEX_RANGE_SCAN) {
+            json res = json::array();
+
+            // Оптимизированный путь с использованием индекса
+            std::vector<RID> matching_rids = execute_indexed_select(table_name, exec_plan);
+
+            Pager tbl_p((db_dir / (table_name + ".tbl")).string());
+
+            for (const auto& rid : matching_rids) {
+                if (!is_valid_page_and_offset(rid)) continue;
+
+                std::vector<char> buf(PAGE_SIZE, 0);
+                tbl_p.read_page(rid.page_id, buf.data());
+
+                if (rid.offset + sizeof(RecordHeader) <= PAGE_SIZE) {
+                    auto* rh = reinterpret_cast<RecordHeader*>(buf.data() + rid.offset);
+                    if (!rh->is_deleted &&
+                        is_live_record_layout(rid.offset, *reinterpret_cast<uint32_t*>(buf.data()), rh)) {
+                        size_t d_off = rid.offset + sizeof(RecordHeader);
+                        auto row = RowDeserializer::deserialize(schema, buf.data(), d_off, string_pool.get());
+
+                        // Дополнительная фильтрация для сложных условий (AND/OR)
+                        if (!plan.where_clause || ConditionEvaluator::evaluate(row, plan.where_clause.get())) {
+                            res.push_back(row);
+                        }
+                    }
+                }
+            }
+
+            apply_group_by_rows(res, plan.group_by_column);
+            apply_order_by_rows(res, plan);
+            result = res.dump(4);
+        } else {
+            // Полный сканирование таблицы (fallback)
+            result = select_full_scan(db_dir, plan, schema, h);
+        }
+
+        restore_database_context();
+        return result;
+    } catch (...) {
+        try {
+            restore_database_context();
+        } catch (...) {
+        }
+        throw;
     }
 }
 
 void Engine::delete_records(const QueryPlan& plan) {
     if (current_db.empty()) throw std::runtime_error("No active DB");
 
+    const auto [db_name_unused, table_name] = split_table_reference(plan.table_name);
+    (void)db_name_unused;
+    if (table_name.empty()) throw std::runtime_error("Empty table name");
+
     fs::path db_dir = fs::path(root_path) / current_db;
-    const std::string meta_path = (db_dir / (plan.table_name + ".meta")).string();
-    const std::string tbl_path = (db_dir / (plan.table_name + ".tbl")).string();
-    const std::string idx_path = (db_dir / (plan.table_name + ".idx")).string();
+    const std::string meta_path = (db_dir / (table_name + ".meta")).string();
+    const std::string tbl_path = (db_dir / (table_name + ".tbl")).string();
+    const std::string idx_path = (db_dir / (table_name + ".idx")).string();
 
     auto h = load_metadata_checked(meta_path);
-    auto schema = get_table_schema(plan.table_name);
+    auto schema = get_table_schema(table_name);
     Pager tbl_p(tbl_path);
     Pager idx_p(idx_path);
 
@@ -1196,7 +1325,7 @@ void Engine::delete_records(const QueryPlan& plan) {
 
                         rh->is_deleted = true;
                         h.row_count--;
-                        logs.push_back(JournalEntry{JournalOp::DELETE, plan.table_name, get_now_timestamp(),
+                        logs.push_back(JournalEntry{JournalOp::DELETE, table_name, get_now_timestamp(),
                             pos_t{page_id, static_cast<uint32_t>(off)}, old_payload, {}});
 
                         page_changed = true;
@@ -1229,13 +1358,17 @@ void Engine::delete_records(const QueryPlan& plan) {
 void Engine::update_records(const QueryPlan& plan) {
     if (current_db.empty()) throw std::runtime_error("No active DB");
 
+    const auto [db_name_unused, table_name] = split_table_reference(plan.table_name);
+    (void)db_name_unused;
+    if (table_name.empty()) throw std::runtime_error("Empty table name");
+
     fs::path db_dir = fs::path(root_path) / current_db;
-    const std::string meta_path = (db_dir / (plan.table_name + ".meta")).string();
-    const std::string tbl_path = (db_dir / (plan.table_name + ".tbl")).string();
-    const std::string idx_path = (db_dir / (plan.table_name + ".idx")).string();
+    const std::string meta_path = (db_dir / (table_name + ".meta")).string();
+    const std::string tbl_path = (db_dir / (table_name + ".tbl")).string();
+    const std::string idx_path = (db_dir / (table_name + ".idx")).string();
 
     auto h = load_metadata_checked(meta_path);
-    auto schema = get_table_schema(plan.table_name);
+    auto schema = get_table_schema(table_name);
     Pager tbl_p(tbl_path);
     Pager idx_p(idx_path);
 
@@ -1357,7 +1490,7 @@ void Engine::update_records(const QueryPlan& plan) {
                                 }
                             }
 
-                            logs.push_back(JournalEntry{JournalOp::UPDATE, plan.table_name, get_now_timestamp(),
+                            logs.push_back(JournalEntry{JournalOp::UPDATE, table_name, get_now_timestamp(),
                                 old_pos, old_payload, new_payload});
 
                             page_changed = true;
@@ -1419,7 +1552,7 @@ void Engine::update_records(const QueryPlan& plan) {
                                 rh->is_deleted = true;
                                 page_changed = true;
                                 h.row_count--;  // will be compensated by the new live row
-                                logs.push_back(JournalEntry{JournalOp::UPDATE, plan.table_name, get_now_timestamp(),
+                                logs.push_back(JournalEntry{JournalOp::UPDATE, table_name, get_now_timestamp(),
                                     old_pos, old_payload, new_payload});
 
                                 // keep row count unchanged globally
@@ -1489,14 +1622,18 @@ void Engine::update_records(const QueryPlan& plan) {
 void Engine::revert(const std::string& table_name, const std::string& timestamp) {
     if (current_db.empty()) throw std::runtime_error("No active DB");
 
+    const auto [db_name_unused, local_table_name] = split_table_reference(table_name);
+    (void)db_name_unused;
+    if (local_table_name.empty()) throw std::runtime_error("Empty table name");
+
     auto entries = journal->get_all_entries();
     fs::path db_dir = fs::path(root_path) / current_db;
-    const std::string meta_path = (db_dir / (table_name + ".meta")).string();
-    const std::string tbl_path = (db_dir / (table_name + ".tbl")).string();
-    const std::string idx_path = (db_dir / (table_name + ".idx")).string();
+    const std::string meta_path = (db_dir / (local_table_name + ".meta")).string();
+    const std::string tbl_path = (db_dir / (local_table_name + ".tbl")).string();
+    const std::string idx_path = (db_dir / (local_table_name + ".idx")).string();
 
     auto h = load_metadata_checked(meta_path);
-    auto schema = get_table_schema(table_name);
+    auto schema = get_table_schema(local_table_name);
     Pager tbl_p(tbl_path);
     Pager idx_p(idx_path);
 
@@ -1506,7 +1643,7 @@ void Engine::revert(const std::string& table_name, const std::string& timestamp)
         for (int i = static_cast<int>(entries.size()) - 1; i >= 0; --i) {
             const auto& e = entries[i];
             if (e.timestamp <= timestamp) break;
-            if (e.table_name != table_name) continue;
+            if (e.table_name != local_table_name) continue;
             if (!is_valid_page_and_offset(e.record_pos)) continue;
 
             if (e.op == JournalOp::INSERT) {
@@ -1657,7 +1794,11 @@ void Engine::revert(const std::string& table_name, const std::string& timestamp)
 }
 
 std::vector<ColumnDef> Engine::get_table_schema(const std::string& table_name) {
-    auto h = load_metadata_checked((fs::path(root_path) / current_db / (table_name + ".meta")).string());
+    const auto [db_name_unused, local_table_name] = split_table_reference(table_name);
+    (void)db_name_unused;
+    if (local_table_name.empty()) throw std::runtime_error("Empty table name");
+
+    auto h = load_metadata_checked((fs::path(root_path) / current_db / (local_table_name + ".meta")).string());
     std::vector<ColumnDef> s;
     s.reserve(h.column_count);
 
@@ -1737,35 +1878,36 @@ std::vector<RID> Engine::execute_indexed_select(const std::string& table_name, c
 
     bool is_int_type = (indexed_col_type == DataType::INT);
 
-    // Открываем B+-дерево индекса в зависимости от типа ключа
-    // Для int ключей
+    std::unique_ptr<Pager> idx_pager;
     std::unique_ptr<BP_tree<int, pos_t>> int_index_tree;
-    // Для string ключей (храним ID строки из string_pool как ключ)
     std::unique_ptr<BP_tree<int, pos_t>> str_index_tree;
 
     try {
-        Pager* idx_p = new Pager(plan.index_path);
-        uint32_t root_page_id = 0;
+        const auto [db_name_unused, local_table_name] = split_table_reference(table_name);
+        (void)db_name_unused;
+        if (local_table_name.empty()) return result;
 
-        // Читаем root page ID из заголовка файла индекса (первый uint32_t)
-        std::vector<char> header_buf(sizeof(uint32_t));
-        idx_p->read_page(0, header_buf.data());
-        root_page_id = *reinterpret_cast<uint32_t*>(header_buf.data());
-
-        if (root_page_id == 0) {
-            // Индекс пуст, создаем новое дерево
-            root_page_id = idx_p->allocate_page();
-            // Записываем root page ID обратно в заголовок
-            *reinterpret_cast<uint32_t*>(header_buf.data()) = root_page_id;
-            idx_p->write_page(0, header_buf.data());
+        auto h = load_metadata_checked((fs::path(root_path) / current_db / (local_table_name + ".meta")).string());
+        size_t indexed_col_pos = h.column_count;
+        for (size_t i = 0; i < h.column_count; ++i) {
+            if (std::string(h.columns[i].name) == plan.indexed_column) {
+                indexed_col_pos = i;
+                break;
+            }
         }
+
+        if (indexed_col_pos >= h.column_count || !h.columns[indexed_col_pos].is_indexed) {
+            return result;
+        }
+
+        idx_pager = std::make_unique<Pager>(plan.index_path);
+        uint32_t root_page_id = h.index_roots[indexed_col_pos];
 
         if (is_int_type) {
-            int_index_tree = std::make_unique<BP_tree<int, pos_t>>(idx_p, root_page_id);
+            int_index_tree = std::make_unique<BP_tree<int, pos_t>>(open_index_tree(*idx_pager, root_page_id));
         } else {
-            str_index_tree = std::make_unique<BP_tree<int, pos_t>>(idx_p, root_page_id);
+            str_index_tree = std::make_unique<BP_tree<int, pos_t>>(open_index_tree(*idx_pager, root_page_id));
         }
-
     } catch (const std::exception& e) {
         throw std::runtime_error("Failed to open index tree: " + std::string(e.what()));
     }
@@ -1950,8 +2092,12 @@ std::vector<RID> Engine::execute_indexed_select(const std::string& table_name, c
 
 std::string Engine::select_full_scan(
     const fs::path& db_dir, const QueryPlan& plan, const Schema& schema, const TableHeader& h) {
+    const auto [db_name_unused, table_name] = split_table_reference(plan.table_name);
+    (void)db_name_unused;
+    if (table_name.empty()) throw std::runtime_error("Empty table name");
+
     json res = json::array();
-    Pager tbl_p((db_dir / (plan.table_name + ".tbl")).string());
+    Pager tbl_p((db_dir / (table_name + ".tbl")).string());
 
     for (uint32_t i = 0; i <= h.last_data_page; ++i) {
         std::vector<char> buf(PAGE_SIZE, 0);
@@ -1985,6 +2131,10 @@ std::string Engine::select_full_scan(
 
 std::string Engine::select_with_aggregates(const fs::path& db_dir, const QueryPlan& plan, const Schema& schema,
     const TableHeader& h, const ExecutionPlan& exec_plan) {
+    const auto [db_name_unused, table_name] = split_table_reference(plan.table_name);
+    (void)db_name_unused;
+    if (table_name.empty()) throw std::runtime_error("Empty table name");
+
     struct AggregateState {
         AggregateType type = AggregateType::NONE;
         bool count_star = false;
@@ -2045,8 +2195,8 @@ std::string Engine::select_with_aggregates(const fs::path& db_dir, const QueryPl
     std::vector<json> matching_rows;
     if (exec_plan.strategy == ExecutionStrategy::INDEX_SEEK ||
         exec_plan.strategy == ExecutionStrategy::INDEX_RANGE_SCAN) {
-        std::vector<RID> matching_rids = execute_indexed_select(plan.table_name, exec_plan);
-        Pager tbl_p((db_dir / (plan.table_name + ".tbl")).string());
+        std::vector<RID> matching_rids = execute_indexed_select(table_name, exec_plan);
+        Pager tbl_p((db_dir / (table_name + ".tbl")).string());
 
         for (const auto& rid : matching_rids) {
             if (!is_valid_page_and_offset(rid)) continue;
@@ -2067,7 +2217,7 @@ std::string Engine::select_with_aggregates(const fs::path& db_dir, const QueryPl
             }
         }
     } else {
-        Pager tbl_p((db_dir / (plan.table_name + ".tbl")).string());
+        Pager tbl_p((db_dir / (table_name + ".tbl")).string());
         for (uint32_t i = 0; i <= h.last_data_page; ++i) {
             std::vector<char> buf(PAGE_SIZE, 0);
             tbl_p.read_page(i, buf.data());

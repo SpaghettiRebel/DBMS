@@ -64,6 +64,7 @@ struct ExecutionPlan {
 class QueryOptimizer {
 public:
     QueryOptimizer(const std::string& db_root_path);
+    void set_current_db(const std::string& db_name);
 
     // Анализ условия WHERE и выбор лучшего плана
     ExecutionPlan analyze(const std::string& table_name, 
@@ -78,6 +79,7 @@ public:
 
 private:
     std::string db_root_;
+    std::string current_db_;
 
     // Сбор всех возможных кандидатов на использование индекса из дерева условий
     void collect_candidates(const ConditionNode* node, 

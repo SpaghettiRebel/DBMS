@@ -21,6 +21,7 @@ vendor/
 *.log
 *.tmp
 *.swp
+dbms_project/test_data/
 
 # Environment
 .env

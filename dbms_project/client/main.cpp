@@ -1,5 +1,6 @@
+#include <cctype>
+#include <fstream>
 #include <iostream>
-#include <map>
 #include <string>
 #include <vector>
 
@@ -8,114 +9,123 @@
 
 namespace {
 
-std::string json_cell_to_string(const nlohmann::json& value) {
-    if (value.is_string()) {
-        return value.get<std::string>();
+std::string trim_copy(const std::string& text) {
+    size_t left = 0;
+    while (left < text.size() && std::isspace(static_cast<unsigned char>(text[left]))) {
+        ++left;
     }
-    if (value.is_null()) {
-        return "null";
+
+    size_t right = text.size();
+    while (right > left && std::isspace(static_cast<unsigned char>(text[right - 1]))) {
+        --right;
     }
-    return value.dump();
+
+    return text.substr(left, right - left);
 }
 
-void print_separator(const std::vector<std::string>& columns, const std::map<std::string, std::size_t>& widths) {
-    std::cout << '+';
-    for (const auto& column : columns) {
-        std::cout << std::string(widths.at(column) + 2, '-') << '+';
-    }
-    std::cout << '\n';
+bool command_complete(const std::string& buffer) {
+    const std::string trimmed = trim_copy(buffer);
+    return !trimmed.empty() && trimmed.back() == ';';
 }
 
-void print_row(const std::vector<std::string>& columns,
-    const std::map<std::string, std::string>& row,
-    const std::map<std::string, std::size_t>& widths) {
+bool execute_query(httplib::Client& client, const std::string& query) {
+    nlohmann::json payload = {{"query", query}};
+    auto res = client.Post("/query", payload.dump(), "application/json");
 
-    std::cout << '|';
-    for (const auto& column : columns) {
-        const auto it = row.find(column);
-        const std::string& value = (it != row.end()) ? it->second : "";
-        std::cout << ' ' << value << std::string(widths.at(column) - value.size(), ' ') << " |";
+    if (res && res->status == 200) {
+        std::cout << res->body << std::endl;
+        return true;
     }
-    std::cout << '\n';
+
+    if (!res) {
+        std::cerr << "Connection failed." << std::endl;
+        return false;
+    }
+
+    std::cerr << "Server: " << res->body << std::endl;
+    return false;
 }
 
-void print_ascii_table(const std::string& json_response) {
-    const nlohmann::json parsed = nlohmann::json::parse(json_response, nullptr, false);
-    if (parsed.is_discarded() || !parsed.is_array()) {
-        std::cout << json_response << std::endl;
-        return;
-    }
+std::vector<std::string> split_script_commands(const std::string& script) {
+    std::vector<std::string> commands;
+    std::string buffer;
+    bool in_string = false;
+    bool escaped = false;
 
-    if (parsed.empty()) {
-        std::cout << "Empty set" << std::endl;
-        return;
-    }
+    for (char ch : script) {
+        buffer.push_back(ch);
 
-    std::vector<std::string> columns;
-    std::vector<std::map<std::string, std::string>> rows;
-    std::map<std::string, std::size_t> widths;
-
-    for (const auto& item : parsed) {
-        std::map<std::string, std::string> row;
-
-        if (item.is_object()) {
-            for (auto it = item.begin(); it != item.end(); ++it) {
-                const std::string key = it.key();
-                const std::string value = json_cell_to_string(it.value());
-
-                if (widths.find(key) == widths.end()) {
-                    columns.push_back(key);
-                    widths[key] = key.size();
-                }
-                if (value.size() > widths[key]) {
-                    widths[key] = value.size();
-                }
-                row[key] = value;
+        if (in_string) {
+            if (escaped) {
+                escaped = false;
+                continue;
             }
-        } else {
-            const std::string key = "value";
-            const std::string value = json_cell_to_string(item);
-            if (widths.find(key) == widths.end()) {
-                columns.push_back(key);
-                widths[key] = key.size();
+            if (ch == '\\') {
+                escaped = true;
+                continue;
             }
-            if (value.size() > widths[key]) {
-                widths[key] = value.size();
+            if (ch == '"') {
+                in_string = false;
             }
-            row[key] = value;
+            continue;
         }
 
-        rows.push_back(std::move(row));
+        if (ch == '"') {
+            in_string = true;
+            continue;
+        }
+
+        if (ch == ';') {
+            std::string command = trim_copy(buffer);
+            if (!command.empty()) {
+                commands.push_back(std::move(command));
+            }
+            buffer.clear();
+        }
     }
 
-    if (columns.empty()) {
-        std::cout << "Empty set" << std::endl;
-        return;
+    std::string tail = trim_copy(buffer);
+    if (!tail.empty()) {
+        commands.push_back(std::move(tail));
     }
 
-    std::map<std::string, std::string> header_row;
-    for (const auto& column : columns) {
-        header_row[column] = column;
-    }
-
-    print_separator(columns, widths);
-    print_row(columns, header_row, widths);
-    print_separator(columns, widths);
-
-    for (const auto& row : rows) {
-        print_row(columns, row, widths);
-    }
-
-    print_separator(columns, widths);
+    return commands;
 }
 
 }
 
 int main(int argc, char* argv[]) {
+    httplib::Client client("127.0.0.1", 18080);
     std::string line;
     std::string command_buffer;
 
-    httplib::Client client("127.0.0.1", 18080);
+    if (argc > 2) {
+        std::cerr << "Usage: " << argv[0] << " [script.sql]" << std::endl;
+        return 1;
+    }
+
+    if (argc == 2) {
+        std::ifstream script(argv[1], std::ios::in | std::ios::binary);
+        if (!script) {
+            std::cerr << "Cannot open script file: " << argv[1] << std::endl;
+            return 1;
+        }
+
+        std::string text((std::istreambuf_iterator<char>(script)), std::istreambuf_iterator<char>());
+        const std::vector<std::string> commands = split_script_commands(text);
+
+        bool all_ok = true;
+        for (const auto& command : commands) {
+            const std::string trimmed = trim_copy(command);
+            if (trimmed.empty()) continue;
+            if (trimmed == "exit") break;
+            if (!execute_query(client, command)) {
+                all_ok = false;
+            }
+        }
+
+        return all_ok ? 0 : 1;
+    }
 
     while (true) {
         std::cout << "dbms> " << std::flush;
@@ -124,7 +134,7 @@ int main(int argc, char* argv[]) {
             break;
         }
 
-        if (line == "exit" && command_buffer.empty()) {
+        if (line == "exit" && trim_copy(command_buffer).empty()) {
             break;
         }
 
@@ -133,25 +143,11 @@ int main(int argc, char* argv[]) {
         }
         command_buffer += line;
 
-        std::size_t last_non_space = command_buffer.find_last_not_of(" \t\r\n");
-        if (last_non_space == std::string::npos || command_buffer[last_non_space] != ';') {
+        if (!command_complete(command_buffer)) {
             continue;
         }
 
-        nlohmann::json payload = {
-            {"query", command_buffer}
-        };
-
-        auto res = client.Post("/query", payload.dump(), "application/json");
-
-        if (res && res->status == 200) {
-            print_ascii_table(res->body);
-        } else if (!res) {
-            std::cout << "Connection failed." << std::endl;
-        } else {
-            std::cout << "Server: " << res->body << std::endl;
-        }
-
+        execute_query(client, command_buffer);
         command_buffer.clear();
     }
 

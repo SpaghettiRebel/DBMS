@@ -134,6 +134,11 @@ SelectTarget make_aggregate_target(AggregateType aggregate, char* column_name, c
     return target;
 }
 
+char* make_qualified_name(char* left, char* right) {
+    const std::string qualified = take_string(left) + "." + take_string(right);
+    return make_owned_c_string(qualified.c_str());
+}
+
 }  // namespace
 %}
 
@@ -156,11 +161,11 @@ SelectTarget make_aggregate_target(AggregateType aggregate, char* column_name, c
 }
 
 %token SELECT SUM MIN MAX AVG COUNT GROUP BY ORDER ASC DESC
-%token USE FROM WHERE INSERT INTO VALUES CREATE TABLE DATABASE INT TEXT
-%token DROP UPDATE SET DELETE AS BETWEEN LIKE AND OR NOT TOK_NULL INDEXED
+%token USE FROM WHERE INSERT INTO VALUES CREATE TABLE DATABASE INT TEXT STRING
+%token DROP UPDATE SET DELETE REVERT AS BETWEEN LIKE AND OR NOT TOK_NULL INDEXED
 %token DEFAULT UNIQUE AUTO_INCREMENT
 %token EQEQ NEQ LEQ GEQ
-%token <str> ID STRING_LITERAL
+%token <str> ID STRING_LITERAL TIMESTAMP_LITERAL
 %token <int_value> INT_LITERAL
 
 %type <select_target_list> select_list select_target_list
@@ -175,7 +180,7 @@ SelectTarget make_aggregate_target(AggregateType aggregate, char* column_name, c
 %type <int_value> column_type aggregate_func opt_order_direction
 %type <op_type> comparison_operator
 %type <assignment_list> assignment_list
-%type <str> opt_alias opt_group_by
+%type <str> opt_alias opt_group_by table_ref timestamp_literal
 %type <order_by> opt_order_by
 %type <column_modifiers> column_modifiers
 
@@ -202,6 +207,7 @@ statement
     | drop_stmt
     | update_stmt
     | delete_stmt
+    | revert_stmt
     ;
 
 use_stmt
@@ -214,7 +220,7 @@ use_stmt
     ;
 
 select_stmt
-    : SELECT select_list FROM ID opt_where opt_group_by opt_order_by
+    : SELECT select_list FROM table_ref opt_where opt_group_by opt_order_by
       {
           reset_parsed_query_plan();
           parsed_query_plan.type = QueryType::SELECT;
@@ -264,17 +270,17 @@ select_target_list
     ;
 
 select_target
-    : ID
-      {
-          $$ = new SelectTarget(make_select_target($1, nullptr));
-      }
-    | ID opt_alias
+    : ID opt_alias
       {
           $$ = new SelectTarget(make_select_target($1, $2));
       }
     | aggregate_func '(' ID ')' opt_alias
       {
           $$ = new SelectTarget(make_aggregate_target(static_cast<AggregateType>($1), $3, $5));
+      }
+    | COUNT '(' ID ')' opt_alias
+      {
+          $$ = new SelectTarget(make_aggregate_target(AggregateType::COUNT, $3, $5));
       }
     | COUNT '(' '*' ')' opt_alias
       {
@@ -298,10 +304,6 @@ aggregate_func
     | AVG
       {
           $$ = static_cast<int>(AggregateType::AVG);
-      }
-    | COUNT
-      {
-          $$ = static_cast<int>(AggregateType::COUNT);
       }
     ;
 
@@ -448,7 +450,7 @@ literal
     ;
 
 insert_stmt
-    : INSERT INTO ID insert_columns VALUES value_rows
+    : INSERT INTO table_ref insert_columns VALUES value_rows
       {
           reset_parsed_query_plan();
           parsed_query_plan.type = QueryType::INSERT;
@@ -525,7 +527,7 @@ create_stmt
           parsed_query_plan.type = QueryType::CREATE_DATABASE;
           parsed_query_plan.database_name = take_string($3);
       }
-    | CREATE TABLE ID '(' column_defs ')'
+    | CREATE TABLE table_ref '(' column_defs ')'
       {
           reset_parsed_query_plan();
           parsed_query_plan.type = QueryType::CREATE_TABLE;
@@ -542,7 +544,7 @@ drop_stmt
           parsed_query_plan.type = QueryType::DROP_DATABASE;
           parsed_query_plan.database_name = take_string($3);
       }
-    | DROP TABLE ID
+    | DROP TABLE table_ref
       {
           reset_parsed_query_plan();
           parsed_query_plan.type = QueryType::DROP_TABLE;
@@ -551,7 +553,7 @@ drop_stmt
     ;
 
 update_stmt
-    : UPDATE ID SET assignment_list WHERE condition
+    : UPDATE table_ref SET assignment_list WHERE condition
       {
           reset_parsed_query_plan();
           parsed_query_plan.type = QueryType::UPDATE;
@@ -581,12 +583,44 @@ assignment_list
     ;
 
 delete_stmt
-    : DELETE FROM ID WHERE condition
+    : DELETE FROM table_ref WHERE condition
       {
           reset_parsed_query_plan();
           parsed_query_plan.type = QueryType::DELETE;
           parsed_query_plan.table_name = take_string($3);
           parsed_query_plan.where_clause.reset($5);
+      }
+    ;
+
+revert_stmt
+    : REVERT table_ref timestamp_literal
+      {
+          reset_parsed_query_plan();
+          parsed_query_plan.type = QueryType::REVERT;
+          parsed_query_plan.table_name = take_string($2);
+          parsed_query_plan.timestamp = take_string($3);
+      }
+    ;
+
+table_ref
+    : ID
+      {
+          $$ = $1;
+      }
+    | ID '.' ID
+      {
+          $$ = make_qualified_name($1, $3);
+      }
+    ;
+
+timestamp_literal
+    : TIMESTAMP_LITERAL
+      {
+          $$ = $1;
+      }
+    | STRING_LITERAL
+      {
+          $$ = $1;
       }
     ;
 
@@ -614,6 +648,10 @@ column_type
       {
           $$ = 1;
       }
+    | STRING
+      {
+          $$ = 1;
+      }
     ;
 
 column_modifiers
@@ -629,6 +667,8 @@ column_modifiers
     | column_modifiers INDEXED
       {
           $1->is_indexed = true;
+          $1->is_unique = true;
+          $1->is_not_null = true;
           $$ = $1;
       }
     | column_modifiers UNIQUE

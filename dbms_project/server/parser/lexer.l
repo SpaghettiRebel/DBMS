@@ -39,7 +39,8 @@ ID_START        [A-Za-z_]
 ID_CONT         [A-Za-z0-9_]
 ID_TOKEN        {ID_START}{ID_CONT}*
 INT_LITERAL_RE  {DIGIT}+
-STRING_LITERAL_RE \'([^\\\n']|\\.)*\'
+STRING_LITERAL_RE \"([^\\\n\"]|\\.)*\"
+TIMESTAMP_LITERAL_RE {DIGIT}{DIGIT}{DIGIT}{DIGIT}\.{DIGIT}{DIGIT}\.{DIGIT}{DIGIT}-{DIGIT}{DIGIT}:{DIGIT}{DIGIT}:{DIGIT}{DIGIT}\.{DIGIT}+
 
 KW_SELECT       [Ss][Ee][Ll][Ee][Cc][Tt]
 KW_SUM          [Ss][Uu][Mm]
@@ -66,6 +67,7 @@ KW_DATABASE     [Dd][Aa][Tt][Aa][Bb][Aa][Ss][Ee]
 KW_UPDATE       [Uu][Pp][Dd][Aa][Tt][Ee]
 KW_SET          [Ss][Ee][Tt]
 KW_DELETE       [Dd][Ee][Ll][Ee][Tt][Ee]
+KW_REVERT       [Rr][Ee][Vv][Ee][Rr][Tt]
 KW_AS           [Aa][Ss]
 KW_BETWEEN      [Bb][Ee][Tt][Ww][Ee][Ee][Nn]
 KW_LIKE         [Ll][Ii][Kk][Ee]
@@ -79,6 +81,7 @@ KW_UNIQUE       [Uu][Nn][Ii][Qq][Uu][Ee]
 KW_AUTO_INCREMENT [Aa][Uu][Tt][Oo]_[Ii][Nn][Cc][Rr][Ee][Mm][Ee][Nn][Tt]
 KW_INT          [Ii][Nn][Tt]
 KW_TEXT         [Tt][Ee][Xx][Tt]
+KW_STRING       [Ss][Tt][Rr][Ii][Nn][Gg]
 
 %%
 
@@ -109,6 +112,7 @@ KW_TEXT         [Tt][Ee][Xx][Tt]
 {KW_UPDATE}     { return UPDATE; }
 {KW_SET}        { return SET; }
 {KW_DELETE}     { return DELETE; }
+{KW_REVERT}     { return REVERT; }
 {KW_AS}         { return AS; }
 {KW_BETWEEN}    { return BETWEEN; }
 {KW_LIKE}       { return LIKE; }
@@ -122,9 +126,11 @@ KW_TEXT         [Tt][Ee][Xx][Tt]
 {KW_AUTO_INCREMENT} { return AUTO_INCREMENT; }
 {KW_INT}        { return INT; }
 {KW_TEXT}       { return TEXT; }
+{KW_STRING}     { return STRING; }
 
 "*"             { return '*'; }
 ","             { return ','; }
+"."             { return '.'; }
 "("             { return '('; }
 ")"             { return ')'; }
 ";"             { return ';'; }
@@ -144,12 +150,16 @@ KW_TEXT         [Tt][Ee][Xx][Tt]
                           yylval.str = copy_sql_string_literal(yytext);
                           return STRING_LITERAL;
                       }
+{TIMESTAMP_LITERAL_RE} {
+                          yylval.str = copy_text(yytext);
+                          return TIMESTAMP_LITERAL;
+                      }
 {ID_TOKEN}            {
                           yylval.str = copy_text(yytext);
                           return ID;
                       }
 
-\'([^\\\n']|\\.)*$ {
+\"([^\\\n\"]|\\.)*$ {
                     fprintf(stderr,
                             "Lexer error (line %d): unterminated string literal: %s\n",
                             yylineno,
