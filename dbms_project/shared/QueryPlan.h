@@ -65,6 +65,8 @@ struct ConditionNode {
     OpType op;
     Value right_value;
     std::optional<Value> right_value_between;
+    std::string right_column;  // For column-to-column comparisons (empty if right_value is used)
+    bool is_right_column = false;  // true if comparing two columns, false if comparing column to literal
 
     LogicalOpType logical_op = LogicalOpType::NONE;
     std::unique_ptr<ConditionNode> left_child;
