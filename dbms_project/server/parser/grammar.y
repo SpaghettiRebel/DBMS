@@ -89,7 +89,18 @@ ConditionNode* make_condition(char* column_name, OpType op, Value* value) {
     condition->left_column = take_string(column_name);
     condition->op = op;
     condition->right_value = std::move(*value);
+    condition->is_right_column = false;
     delete value;
+    return condition;
+}
+
+ConditionNode* make_column_comparison(char* left_column, OpType op, char* right_column) {
+    auto* condition = new ConditionNode{};
+    condition->is_leaf = true;
+    condition->left_column = take_string(left_column);
+    condition->op = op;
+    condition->right_column = take_string(right_column);
+    condition->is_right_column = true;
     return condition;
 }
 
@@ -392,6 +403,10 @@ predicate
     : ID comparison_operator literal
       {
           $$ = make_condition($1, $2, $3);
+      }
+    | ID comparison_operator ID
+      {
+          $$ = make_column_comparison($1, $2, $3);
       }
     | ID BETWEEN literal AND literal
       {

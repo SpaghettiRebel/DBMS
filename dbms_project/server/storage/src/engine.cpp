@@ -619,6 +619,58 @@ public:
         return false;
     }
 
+    static bool compare_columns(const json& lhs, const json& rhs, OpType op) {
+        if (lhs.is_null() || rhs.is_null()) return false;
+
+        // Both integers
+        if (lhs.is_number_integer() && rhs.is_number_integer()) {
+            const int l = lhs.get<int>();
+            const int r = rhs.get<int>();
+
+            switch (op) {
+                case OpType::EQ:
+                    return l == r;
+                case OpType::NEQ:
+                    return l != r;
+                case OpType::LESS:
+                    return l < r;
+                case OpType::GREATER:
+                    return l > r;
+                case OpType::LEQ:
+                    return l <= r;
+                case OpType::GEQ:
+                    return l >= r;
+                default:
+                    return false;
+            }
+        }
+
+        // Both strings
+        if (lhs.is_string() && rhs.is_string()) {
+            const auto& l = lhs.get_ref<const std::string&>();
+            const auto& r = rhs.get_ref<const std::string&>();
+
+            switch (op) {
+                case OpType::EQ:
+                    return l == r;
+                case OpType::NEQ:
+                    return l != r;
+                case OpType::LESS:
+                    return l < r;
+                case OpType::GREATER:
+                    return l > r;
+                case OpType::LEQ:
+                    return l <= r;
+                case OpType::GEQ:
+                    return l >= r;
+                default:
+                    return false;
+            }
+        }
+
+        return false;
+    }
+
     static bool evaluate(const json& row, const ConditionNode* node) {
         if (!node) return true;
 
@@ -634,6 +686,13 @@ public:
 
         if (!row.contains(node->left_column)) return false;
         const json& val = row.at(node->left_column);
+
+        // Check if comparing two columns
+        if (node->is_right_column) {
+            if (!row.contains(node->right_column)) return false;
+            const json& right_val = row.at(node->right_column);
+            return compare_columns(val, right_val, node->op);
+        }
 
         switch (node->op) {
             case OpType::EQ:
@@ -877,16 +936,18 @@ void Engine::drop_database(const std::string& name) {
     fs::path db_path = fs::path(root_path) / name;
     if (!fs::exists(db_path)) throw std::runtime_error("No DB");
 
-    const auto removed = fs::remove_all(db_path);
-    if (removed == 0) {
-        throw std::runtime_error("Failed to remove DB: " + name);
-    }
-
+    // If the database being dropped is currently active, clear its context first
+    // This ensures all file handles (Pager, fstream, etc.) are released before deletion
     if (current_db == name) {
         current_db.clear();
         string_pool.reset();
         journal.reset();
         query_optimizer->set_current_db(current_db);
+    }
+
+    const auto removed = fs::remove_all(db_path);
+    if (removed == 0) {
+        throw std::runtime_error("Failed to remove DB: " + name);
     }
 }
 
