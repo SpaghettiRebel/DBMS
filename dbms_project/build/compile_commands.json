@@ -1,72 +1,67 @@
 [
 {
   "directory": "/workspace/dbms_project/build",
-  "command": "/usr/bin/c++  -I/workspace/dbms_project/server/storage/include -I/workspace/dbms_project/shared  -Wall -Wextra -O2 -fconcepts -Wno-unused-parameter -Wno-unused-variable -Wno-unused-but-set-variable -g -DDEBUG -std=gnu++20 -o CMakeFiles/storage_lib.dir/server/storage/src/engine.cpp.o -c /workspace/dbms_project/server/storage/src/engine.cpp",
+  "command": "/usr/bin/c++  -I/workspace/dbms_project/server/storage/include -I/workspace/dbms_project/shared -I/workspace/dbms_project/third_party/boost -I/workspace/dbms_project/third_party  -Wall -Wextra -O2 -fconcepts -Wno-unused-parameter -Wno-unused-variable -Wno-unused-but-set-variable -g -DDEBUG -std=gnu++20 -o CMakeFiles/storage_lib.dir/server/storage/src/engine.cpp.o -c /workspace/dbms_project/server/storage/src/engine.cpp",
   "file": "/workspace/dbms_project/server/storage/src/engine.cpp"
 },
 {
   "directory": "/workspace/dbms_project/build",
-  "command": "/usr/bin/c++  -I/workspace/dbms_project/server/storage/include -I/workspace/dbms_project/shared  -Wall -Wextra -O2 -fconcepts -Wno-unused-parameter -Wno-unused-variable -Wno-unused-but-set-variable -g -DDEBUG -std=gnu++20 -o CMakeFiles/storage_lib.dir/server/storage/src/file_manager.cpp.o -c /workspace/dbms_project/server/storage/src/file_manager.cpp",
+  "command": "/usr/bin/c++  -I/workspace/dbms_project/server/storage/include -I/workspace/dbms_project/shared -I/workspace/dbms_project/third_party/boost -I/workspace/dbms_project/third_party  -Wall -Wextra -O2 -fconcepts -Wno-unused-parameter -Wno-unused-variable -Wno-unused-but-set-variable -g -DDEBUG -std=gnu++20 -o CMakeFiles/storage_lib.dir/server/storage/src/file_manager.cpp.o -c /workspace/dbms_project/server/storage/src/file_manager.cpp",
   "file": "/workspace/dbms_project/server/storage/src/file_manager.cpp"
 },
 {
   "directory": "/workspace/dbms_project/build",
-  "command": "/usr/bin/c++  -I/workspace/dbms_project/server/storage/include -I/workspace/dbms_project/shared  -Wall -Wextra -O2 -fconcepts -Wno-unused-parameter -Wno-unused-variable -Wno-unused-but-set-variable -g -DDEBUG -std=gnu++20 -o CMakeFiles/storage_lib.dir/server/storage/src/binary_file_manager.cpp.o -c /workspace/dbms_project/server/storage/src/binary_file_manager.cpp",
+  "command": "/usr/bin/c++  -I/workspace/dbms_project/server/storage/include -I/workspace/dbms_project/shared -I/workspace/dbms_project/third_party/boost -I/workspace/dbms_project/third_party  -Wall -Wextra -O2 -fconcepts -Wno-unused-parameter -Wno-unused-variable -Wno-unused-but-set-variable -g -DDEBUG -std=gnu++20 -o CMakeFiles/storage_lib.dir/server/storage/src/binary_file_manager.cpp.o -c /workspace/dbms_project/server/storage/src/binary_file_manager.cpp",
   "file": "/workspace/dbms_project/server/storage/src/binary_file_manager.cpp"
 },
 {
   "directory": "/workspace/dbms_project/build",
-  "command": "/usr/bin/c++  -I/workspace/dbms_project/server/storage/include -I/workspace/dbms_project/shared  -Wall -Wextra -O2 -fconcepts -Wno-unused-parameter -Wno-unused-variable -Wno-unused-but-set-variable -g -DDEBUG -std=gnu++20 -o CMakeFiles/storage_lib.dir/server/storage/src/bplus_tree_persistence.cpp.o -c /workspace/dbms_project/server/storage/src/bplus_tree_persistence.cpp",
+  "command": "/usr/bin/c++  -I/workspace/dbms_project/server/storage/include -I/workspace/dbms_project/shared -I/workspace/dbms_project/third_party/boost -I/workspace/dbms_project/third_party  -Wall -Wextra -O2 -fconcepts -Wno-unused-parameter -Wno-unused-variable -Wno-unused-but-set-variable -g -DDEBUG -std=gnu++20 -o CMakeFiles/storage_lib.dir/server/storage/src/bplus_tree_persistence.cpp.o -c /workspace/dbms_project/server/storage/src/bplus_tree_persistence.cpp",
   "file": "/workspace/dbms_project/server/storage/src/bplus_tree_persistence.cpp"
 },
 {
   "directory": "/workspace/dbms_project/build",
-  "command": "/usr/bin/c++  -I/workspace/dbms_project/server/storage/include -I/workspace/dbms_project/shared  -Wall -Wextra -O2 -fconcepts -Wno-unused-parameter -Wno-unused-variable -Wno-unused-but-set-variable -g -DDEBUG -std=gnu++20 -o CMakeFiles/storage_lib.dir/server/storage/src/wal_manager.cpp.o -c /workspace/dbms_project/server/storage/src/wal_manager.cpp",
+  "command": "/usr/bin/c++  -I/workspace/dbms_project/server/storage/include -I/workspace/dbms_project/shared -I/workspace/dbms_project/third_party/boost -I/workspace/dbms_project/third_party  -Wall -Wextra -O2 -fconcepts -Wno-unused-parameter -Wno-unused-variable -Wno-unused-but-set-variable -g -DDEBUG -std=gnu++20 -o CMakeFiles/storage_lib.dir/server/storage/src/wal_manager.cpp.o -c /workspace/dbms_project/server/storage/src/wal_manager.cpp",
   "file": "/workspace/dbms_project/server/storage/src/wal_manager.cpp"
 },
 {
   "directory": "/workspace/dbms_project/build",
-  "command": "/usr/bin/c++  -I/workspace/dbms_project/server/storage/include -I/workspace/dbms_project/shared  -Wall -Wextra -O2 -fconcepts -Wno-unused-parameter -Wno-unused-variable -Wno-unused-but-set-variable -g -DDEBUG -std=gnu++20 -o CMakeFiles/storage_lib.dir/server/storage/src/journal.cpp.o -c /workspace/dbms_project/server/storage/src/journal.cpp",
+  "command": "/usr/bin/c++  -I/workspace/dbms_project/server/storage/include -I/workspace/dbms_project/shared -I/workspace/dbms_project/third_party/boost -I/workspace/dbms_project/third_party  -Wall -Wextra -O2 -fconcepts -Wno-unused-parameter -Wno-unused-variable -Wno-unused-but-set-variable -g -DDEBUG -std=gnu++20 -o CMakeFiles/storage_lib.dir/server/storage/src/journal.cpp.o -c /workspace/dbms_project/server/storage/src/journal.cpp",
   "file": "/workspace/dbms_project/server/storage/src/journal.cpp"
 },
 {
   "directory": "/workspace/dbms_project/build",
-  "command": "/usr/bin/c++  -I/workspace/dbms_project/server/storage/include -I/workspace/dbms_project/shared  -Wall -Wextra -O2 -fconcepts -Wno-unused-parameter -Wno-unused-variable -Wno-unused-but-set-variable -g -DDEBUG -std=gnu++20 -o CMakeFiles/storage_lib.dir/server/storage/src/string_pool.cpp.o -c /workspace/dbms_project/server/storage/src/string_pool.cpp",
+  "command": "/usr/bin/c++  -I/workspace/dbms_project/server/storage/include -I/workspace/dbms_project/shared -I/workspace/dbms_project/third_party/boost -I/workspace/dbms_project/third_party  -Wall -Wextra -O2 -fconcepts -Wno-unused-parameter -Wno-unused-variable -Wno-unused-but-set-variable -g -DDEBUG -std=gnu++20 -o CMakeFiles/storage_lib.dir/server/storage/src/string_pool.cpp.o -c /workspace/dbms_project/server/storage/src/string_pool.cpp",
   "file": "/workspace/dbms_project/server/storage/src/string_pool.cpp"
 },
 {
   "directory": "/workspace/dbms_project/build",
-  "command": "/usr/bin/c++  -I/workspace/dbms_project/server/storage/include -I/workspace/dbms_project/shared  -Wall -Wextra -O2 -fconcepts -Wno-unused-parameter -Wno-unused-variable -Wno-unused-but-set-variable -g -DDEBUG -std=gnu++20 -o CMakeFiles/storage_lib.dir/server/storage/src/query_optimizer.cpp.o -c /workspace/dbms_project/server/storage/src/query_optimizer.cpp",
+  "command": "/usr/bin/c++  -I/workspace/dbms_project/server/storage/include -I/workspace/dbms_project/shared -I/workspace/dbms_project/third_party/boost -I/workspace/dbms_project/third_party  -Wall -Wextra -O2 -fconcepts -Wno-unused-parameter -Wno-unused-variable -Wno-unused-but-set-variable -g -DDEBUG -std=gnu++20 -o CMakeFiles/storage_lib.dir/server/storage/src/query_optimizer.cpp.o -c /workspace/dbms_project/server/storage/src/query_optimizer.cpp",
   "file": "/workspace/dbms_project/server/storage/src/query_optimizer.cpp"
 },
 {
   "directory": "/workspace/dbms_project/build",
-  "command": "/usr/bin/c++  -I/workspace/dbms_project/server/storage/include -I/workspace/dbms_project/shared  -Wall -Wextra -O2 -fconcepts -Wno-unused-parameter -Wno-unused-variable -Wno-unused-but-set-variable -g -DDEBUG -std=gnu++20 -o CMakeFiles/storage_lib.dir/server/storage/src/schema_manager.cpp.o -c /workspace/dbms_project/server/storage/src/schema_manager.cpp",
+  "command": "/usr/bin/c++  -I/workspace/dbms_project/server/storage/include -I/workspace/dbms_project/shared -I/workspace/dbms_project/third_party/boost -I/workspace/dbms_project/third_party  -Wall -Wextra -O2 -fconcepts -Wno-unused-parameter -Wno-unused-variable -Wno-unused-but-set-variable -g -DDEBUG -std=gnu++20 -o CMakeFiles/storage_lib.dir/server/storage/src/schema_manager.cpp.o -c /workspace/dbms_project/server/storage/src/schema_manager.cpp",
   "file": "/workspace/dbms_project/server/storage/src/schema_manager.cpp"
 },
 {
   "directory": "/workspace/dbms_project/build",
-  "command": "/usr/bin/c++  -I/workspace/dbms_project/server/storage/include -I/workspace/dbms_project/shared  -Wall -Wextra -O2 -fconcepts -Wno-unused-parameter -Wno-unused-variable -Wno-unused-but-set-variable -g -DDEBUG -std=gnu++20 -o CMakeFiles/storage_lib.dir/server/storage/src/access_logger.cpp.o -c /workspace/dbms_project/server/storage/src/access_logger.cpp",
+  "command": "/usr/bin/c++  -I/workspace/dbms_project/server/storage/include -I/workspace/dbms_project/shared -I/workspace/dbms_project/third_party/boost -I/workspace/dbms_project/third_party  -Wall -Wextra -O2 -fconcepts -Wno-unused-parameter -Wno-unused-variable -Wno-unused-but-set-variable -g -DDEBUG -std=gnu++20 -o CMakeFiles/storage_lib.dir/server/storage/src/access_logger.cpp.o -c /workspace/dbms_project/server/storage/src/access_logger.cpp",
   "file": "/workspace/dbms_project/server/storage/src/access_logger.cpp"
 },
 {
   "directory": "/workspace/dbms_project/build",
-  "command": "/usr/bin/c++  -I/workspace/dbms_project/server/storage/include -I/workspace/dbms_project/shared  -Wall -Wextra -O2 -fconcepts -Wno-unused-parameter -Wno-unused-variable -Wno-unused-but-set-variable -g -DDEBUG -std=gnu++20 -o CMakeFiles/storage_lib.dir/server/storage/src/storage_server.cpp.o -c /workspace/dbms_project/server/storage/src/storage_server.cpp",
+  "command": "/usr/bin/c++  -I/workspace/dbms_project/server/storage/include -I/workspace/dbms_project/shared -I/workspace/dbms_project/third_party/boost -I/workspace/dbms_project/third_party  -Wall -Wextra -O2 -fconcepts -Wno-unused-parameter -Wno-unused-variable -Wno-unused-but-set-variable -g -DDEBUG -std=gnu++20 -o CMakeFiles/storage_lib.dir/server/storage/src/storage_server.cpp.o -c /workspace/dbms_project/server/storage/src/storage_server.cpp",
   "file": "/workspace/dbms_project/server/storage/src/storage_server.cpp"
 },
 {
   "directory": "/workspace/dbms_project/build",
-  "command": "/usr/bin/c++  -I/workspace/dbms_project/server/storage/include -I/workspace/dbms_project/shared  -Wall -Wextra -O2 -fconcepts -Wno-unused-parameter -Wno-unused-variable -Wno-unused-but-set-variable -g -DDEBUG -std=gnu++20 -o CMakeFiles/storage_server.dir/server/storage/src/main_storage_server.cpp.o -c /workspace/dbms_project/server/storage/src/main_storage_server.cpp",
+  "command": "/usr/bin/c++  -I/workspace/dbms_project/server/storage/include -I/workspace/dbms_project/shared -I/workspace/dbms_project/third_party/boost -I/workspace/dbms_project/third_party  -Wall -Wextra -O2 -fconcepts -Wno-unused-parameter -Wno-unused-variable -Wno-unused-but-set-variable -g -DDEBUG -std=gnu++20 -o CMakeFiles/storage_server.dir/server/storage/src/main_storage_server.cpp.o -c /workspace/dbms_project/server/storage/src/main_storage_server.cpp",
   "file": "/workspace/dbms_project/server/storage/src/main_storage_server.cpp"
 },
 {
   "directory": "/workspace/dbms_project/build",
-  "command": "/usr/bin/c++    -Wall -Wextra -O2 -fconcepts -Wno-unused-parameter -Wno-unused-variable -Wno-unused-but-set-variable -g -DDEBUG -std=gnu++20 -o CMakeFiles/dbms_client.dir/client/main.cpp.o -c /workspace/dbms_project/client/main.cpp",
-  "file": "/workspace/dbms_project/client/main.cpp"
-},
-{
-  "directory": "/workspace/dbms_project/build",
-  "command": "/usr/bin/c++  -I/workspace/dbms_project/server/storage/include -I/workspace/dbms_project/shared  -Wall -Wextra -O2 -fconcepts -Wno-unused-parameter -Wno-unused-variable -Wno-unused-but-set-variable -g -DDEBUG -std=gnu++20 -o CMakeFiles/test_binary_file_manager.dir/server/storage/tests/test_binary_file_manager.cpp.o -c /workspace/dbms_project/server/storage/tests/test_binary_file_manager.cpp",
+  "command": "/usr/bin/c++  -I/workspace/dbms_project/server/storage/include -I/workspace/dbms_project/shared -I/workspace/dbms_project/third_party/boost -I/workspace/dbms_project/third_party  -Wall -Wextra -O2 -fconcepts -Wno-unused-parameter -Wno-unused-variable -Wno-unused-but-set-variable -g -DDEBUG -std=gnu++20 -o CMakeFiles/test_binary_file_manager.dir/server/storage/tests/test_binary_file_manager.cpp.o -c /workspace/dbms_project/server/storage/tests/test_binary_file_manager.cpp",
   "file": "/workspace/dbms_project/server/storage/tests/test_binary_file_manager.cpp"
 },
 {
@@ -103,5 +98,85 @@
   "directory": "/workspace/dbms_project/build",
   "command": "/usr/bin/c++  -I/workspace/dbms_project/server/cluster/include -I/workspace/dbms_project/shared  -Wall -Wextra -O2 -fconcepts -Wno-unused-parameter -Wno-unused-variable -Wno-unused-but-set-variable -g -DDEBUG -std=gnu++20 -o CMakeFiles/cluster_entrypoint.dir/server/cluster/src/main_cluster.cpp.o -c /workspace/dbms_project/server/cluster/src/main_cluster.cpp",
   "file": "/workspace/dbms_project/server/cluster/src/main_cluster.cpp"
+},
+{
+  "directory": "/workspace/dbms_project/build/client",
+  "command": "/usr/bin/c++  -I/workspace/dbms_project/shared -I/workspace/dbms_project/third_party  -Wall -Wextra -O2 -fconcepts -Wno-unused-parameter -Wno-unused-variable -Wno-unused-but-set-variable -g -DDEBUG -std=gnu++20 -o CMakeFiles/dbms_client.dir/main.cpp.o -c /workspace/dbms_project/client/main.cpp",
+  "file": "/workspace/dbms_project/client/main.cpp"
+},
+{
+  "directory": "/workspace/dbms_project/build/server",
+  "command": "/usr/bin/c++  -I/workspace/dbms_project/server/storage/include -I/workspace/dbms_project/server/../shared -I/workspace/dbms_project/server/../third_party/boost -I/workspace/dbms_project/server/../third_party  -Wall -Wextra -O2 -fconcepts -Wno-unused-parameter -Wno-unused-variable -Wno-unused-but-set-variable -g -DDEBUG -std=c++20 -o CMakeFiles/dbms_storage_core.dir/storage/src/engine.cpp.o -c /workspace/dbms_project/server/storage/src/engine.cpp",
+  "file": "/workspace/dbms_project/server/storage/src/engine.cpp"
+},
+{
+  "directory": "/workspace/dbms_project/build/server",
+  "command": "/usr/bin/c++  -I/workspace/dbms_project/server/storage/include -I/workspace/dbms_project/server/../shared -I/workspace/dbms_project/server/../third_party/boost -I/workspace/dbms_project/server/../third_party  -Wall -Wextra -O2 -fconcepts -Wno-unused-parameter -Wno-unused-variable -Wno-unused-but-set-variable -g -DDEBUG -std=c++20 -o CMakeFiles/dbms_storage_core.dir/storage/src/file_manager.cpp.o -c /workspace/dbms_project/server/storage/src/file_manager.cpp",
+  "file": "/workspace/dbms_project/server/storage/src/file_manager.cpp"
+},
+{
+  "directory": "/workspace/dbms_project/build/server",
+  "command": "/usr/bin/c++  -I/workspace/dbms_project/server/storage/include -I/workspace/dbms_project/server/../shared -I/workspace/dbms_project/server/../third_party/boost -I/workspace/dbms_project/server/../third_party  -Wall -Wextra -O2 -fconcepts -Wno-unused-parameter -Wno-unused-variable -Wno-unused-but-set-variable -g -DDEBUG -std=c++20 -o CMakeFiles/dbms_storage_core.dir/storage/src/binary_file_manager.cpp.o -c /workspace/dbms_project/server/storage/src/binary_file_manager.cpp",
+  "file": "/workspace/dbms_project/server/storage/src/binary_file_manager.cpp"
+},
+{
+  "directory": "/workspace/dbms_project/build/server",
+  "command": "/usr/bin/c++  -I/workspace/dbms_project/server/storage/include -I/workspace/dbms_project/server/../shared -I/workspace/dbms_project/server/../third_party/boost -I/workspace/dbms_project/server/../third_party  -Wall -Wextra -O2 -fconcepts -Wno-unused-parameter -Wno-unused-variable -Wno-unused-but-set-variable -g -DDEBUG -std=c++20 -o CMakeFiles/dbms_storage_core.dir/storage/src/bplus_tree_persistence.cpp.o -c /workspace/dbms_project/server/storage/src/bplus_tree_persistence.cpp",
+  "file": "/workspace/dbms_project/server/storage/src/bplus_tree_persistence.cpp"
+},
+{
+  "directory": "/workspace/dbms_project/build/server",
+  "command": "/usr/bin/c++  -I/workspace/dbms_project/server/storage/include -I/workspace/dbms_project/server/../shared -I/workspace/dbms_project/server/../third_party/boost -I/workspace/dbms_project/server/../third_party  -Wall -Wextra -O2 -fconcepts -Wno-unused-parameter -Wno-unused-variable -Wno-unused-but-set-variable -g -DDEBUG -std=c++20 -o CMakeFiles/dbms_storage_core.dir/storage/src/wal_manager.cpp.o -c /workspace/dbms_project/server/storage/src/wal_manager.cpp",
+  "file": "/workspace/dbms_project/server/storage/src/wal_manager.cpp"
+},
+{
+  "directory": "/workspace/dbms_project/build/server",
+  "command": "/usr/bin/c++  -I/workspace/dbms_project/server/storage/include -I/workspace/dbms_project/server/../shared -I/workspace/dbms_project/server/../third_party/boost -I/workspace/dbms_project/server/../third_party  -Wall -Wextra -O2 -fconcepts -Wno-unused-parameter -Wno-unused-variable -Wno-unused-but-set-variable -g -DDEBUG -std=c++20 -o CMakeFiles/dbms_storage_core.dir/storage/src/journal.cpp.o -c /workspace/dbms_project/server/storage/src/journal.cpp",
+  "file": "/workspace/dbms_project/server/storage/src/journal.cpp"
+},
+{
+  "directory": "/workspace/dbms_project/build/server",
+  "command": "/usr/bin/c++  -I/workspace/dbms_project/server/storage/include -I/workspace/dbms_project/server/../shared -I/workspace/dbms_project/server/../third_party/boost -I/workspace/dbms_project/server/../third_party  -Wall -Wextra -O2 -fconcepts -Wno-unused-parameter -Wno-unused-variable -Wno-unused-but-set-variable -g -DDEBUG -std=c++20 -o CMakeFiles/dbms_storage_core.dir/storage/src/string_pool.cpp.o -c /workspace/dbms_project/server/storage/src/string_pool.cpp",
+  "file": "/workspace/dbms_project/server/storage/src/string_pool.cpp"
+},
+{
+  "directory": "/workspace/dbms_project/build/server",
+  "command": "/usr/bin/c++  -I/workspace/dbms_project/server/storage/include -I/workspace/dbms_project/server/../shared -I/workspace/dbms_project/server/../third_party/boost -I/workspace/dbms_project/server/../third_party  -Wall -Wextra -O2 -fconcepts -Wno-unused-parameter -Wno-unused-variable -Wno-unused-but-set-variable -g -DDEBUG -std=c++20 -o CMakeFiles/dbms_storage_core.dir/storage/src/query_optimizer.cpp.o -c /workspace/dbms_project/server/storage/src/query_optimizer.cpp",
+  "file": "/workspace/dbms_project/server/storage/src/query_optimizer.cpp"
+},
+{
+  "directory": "/workspace/dbms_project/build/server",
+  "command": "/usr/bin/c++  -I/workspace/dbms_project/server/storage/include -I/workspace/dbms_project/server/../shared -I/workspace/dbms_project/server/../third_party/boost -I/workspace/dbms_project/server/../third_party  -Wall -Wextra -O2 -fconcepts -Wno-unused-parameter -Wno-unused-variable -Wno-unused-but-set-variable -g -DDEBUG -std=c++20 -o CMakeFiles/dbms_storage_core.dir/storage/src/schema_manager.cpp.o -c /workspace/dbms_project/server/storage/src/schema_manager.cpp",
+  "file": "/workspace/dbms_project/server/storage/src/schema_manager.cpp"
+},
+{
+  "directory": "/workspace/dbms_project/build/server",
+  "command": "/usr/bin/c++  -I/workspace/dbms_project/server/storage/include -I/workspace/dbms_project/server/../shared -I/workspace/dbms_project/server/../third_party/boost -I/workspace/dbms_project/server/../third_party  -Wall -Wextra -O2 -fconcepts -Wno-unused-parameter -Wno-unused-variable -Wno-unused-but-set-variable -g -DDEBUG -std=c++20 -o CMakeFiles/dbms_storage_core.dir/storage/src/access_logger.cpp.o -c /workspace/dbms_project/server/storage/src/access_logger.cpp",
+  "file": "/workspace/dbms_project/server/storage/src/access_logger.cpp"
+},
+{
+  "directory": "/workspace/dbms_project/build/server",
+  "command": "/usr/bin/c++  -I/workspace/dbms_project/server -I/workspace/dbms_project/server/network -I/workspace/dbms_project/server/storage/include -I/workspace/dbms_project/server/../shared -I/workspace/dbms_project/server/../third_party/crow -I/workspace/dbms_project/server/../third_party/boost -I/workspace/dbms_project/build/server/parser_generated -I/workspace/dbms_project/server/../third_party  -Wall -Wextra -O2 -fconcepts -Wno-unused-parameter -Wno-unused-variable -Wno-unused-but-set-variable -g -DDEBUG -std=c++20 -o CMakeFiles/dbms_http_server.dir/main.cpp.o -c /workspace/dbms_project/server/main.cpp",
+  "file": "/workspace/dbms_project/server/main.cpp"
+},
+{
+  "directory": "/workspace/dbms_project/build/server",
+  "command": "/usr/bin/c++  -I/workspace/dbms_project/server -I/workspace/dbms_project/server/network -I/workspace/dbms_project/server/storage/include -I/workspace/dbms_project/server/../shared -I/workspace/dbms_project/server/../third_party/crow -I/workspace/dbms_project/server/../third_party/boost -I/workspace/dbms_project/build/server/parser_generated -I/workspace/dbms_project/server/../third_party  -Wall -Wextra -O2 -fconcepts -Wno-unused-parameter -Wno-unused-variable -Wno-unused-but-set-variable -g -DDEBUG -std=c++20 -o CMakeFiles/dbms_http_server.dir/network/http_server.cpp.o -c /workspace/dbms_project/server/network/http_server.cpp",
+  "file": "/workspace/dbms_project/server/network/http_server.cpp"
+},
+{
+  "directory": "/workspace/dbms_project/build/server",
+  "command": "/usr/bin/c++  -I/workspace/dbms_project/server -I/workspace/dbms_project/server/network -I/workspace/dbms_project/server/storage/include -I/workspace/dbms_project/server/../shared -I/workspace/dbms_project/server/../third_party/crow -I/workspace/dbms_project/server/../third_party/boost -I/workspace/dbms_project/build/server/parser_generated -I/workspace/dbms_project/server/../third_party  -Wall -Wextra -O2 -fconcepts -Wno-unused-parameter -Wno-unused-variable -Wno-unused-but-set-variable -g -DDEBUG -std=c++20 -o CMakeFiles/dbms_http_server.dir/network/auth.cpp.o -c /workspace/dbms_project/server/network/auth.cpp",
+  "file": "/workspace/dbms_project/server/network/auth.cpp"
+},
+{
+  "directory": "/workspace/dbms_project/build/server",
+  "command": "/usr/bin/c++  -I/workspace/dbms_project/server -I/workspace/dbms_project/server/network -I/workspace/dbms_project/server/storage/include -I/workspace/dbms_project/server/../shared -I/workspace/dbms_project/server/../third_party/crow -I/workspace/dbms_project/server/../third_party/boost -I/workspace/dbms_project/build/server/parser_generated -I/workspace/dbms_project/server/../third_party  -Wall -Wextra -O2 -fconcepts -Wno-unused-parameter -Wno-unused-variable -Wno-unused-but-set-variable -g -DDEBUG -std=c++20 -o CMakeFiles/dbms_http_server.dir/parser_generated/grammar.tab.cpp.o -c /workspace/dbms_project/build/server/parser_generated/grammar.tab.cpp",
+  "file": "/workspace/dbms_project/build/server/parser_generated/grammar.tab.cpp"
+},
+{
+  "directory": "/workspace/dbms_project/build/server",
+  "command": "/usr/bin/c++  -I/workspace/dbms_project/server -I/workspace/dbms_project/server/network -I/workspace/dbms_project/server/storage/include -I/workspace/dbms_project/server/../shared -I/workspace/dbms_project/server/../third_party/crow -I/workspace/dbms_project/server/../third_party/boost -I/workspace/dbms_project/build/server/parser_generated -I/workspace/dbms_project/server/../third_party  -Wall -Wextra -O2 -fconcepts -Wno-unused-parameter -Wno-unused-variable -Wno-unused-but-set-variable -g -DDEBUG -std=c++20 -o CMakeFiles/dbms_http_server.dir/parser_generated/lex.yy.cpp.o -c /workspace/dbms_project/build/server/parser_generated/lex.yy.cpp",
+  "file": "/workspace/dbms_project/build/server/parser_generated/lex.yy.cpp"
 }
 ]
