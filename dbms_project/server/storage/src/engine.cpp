@@ -395,6 +395,42 @@ void apply_order_by_rows(json& rows, const QueryPlan& plan) {
     });
 }
 
+// Применяет проекцию колонок к результатам SELECT
+void apply_column_projection(json& rows, const QueryPlan& plan) {
+    if (!rows.is_array() || rows.empty()) return;
+    
+    // Проверяем, есть ли конкретные колонки в запросе (не *)
+    bool select_all = false;
+    std::vector<std::string> columns_to_keep;
+    
+    for (const auto& target : plan.select_targets) {
+        if (target.column_name == "*") {
+            select_all = true;
+            break;
+        }
+        std::string col_name = target.alias.empty() ? target.column_name : target.alias;
+        columns_to_keep.push_back(col_name);
+    }
+    
+    if (select_all || columns_to_keep.empty()) {
+        // Возвращаем все колонки
+        return;
+    }
+    
+    // Применяем проекцию к каждой строке
+    for (auto& row : rows) {
+        if (!row.is_object()) continue;
+        
+        json projected_row = json::object();
+        for (const auto& col_name : columns_to_keep) {
+            if (row.contains(col_name)) {
+                projected_row[col_name] = row[col_name];
+            }
+        }
+        row = std::move(projected_row);
+    }
+}
+
 bool build_insert_values(const QueryPlan& plan, const std::vector<ColumnDef>& schema, TableHeader& h,
     StringPool* pool, std::vector<Value>& out_values) {
     auto col_index = build_column_index(schema);
@@ -1291,6 +1327,7 @@ std::string Engine::select_records(const QueryPlan& plan) {
 
             apply_group_by_rows(res, plan.group_by_column);
             apply_order_by_rows(res, plan);
+            apply_column_projection(res, plan);
             result = res.dump(4);
         } else {
             // Полный сканирование таблицы (fallback)
@@ -2187,6 +2224,7 @@ std::string Engine::select_full_scan(
 
     apply_group_by_rows(res, plan.group_by_column);
     apply_order_by_rows(res, plan);
+    apply_column_projection(res, plan);
     return res.dump(4);
 }
 
@@ -2447,5 +2485,6 @@ std::string Engine::select_with_aggregates(const fs::path& db_dir, const QueryPl
     }
 
     apply_order_by_rows(res, plan);
+    apply_column_projection(res, plan);
     return res.dump(4);
 }
