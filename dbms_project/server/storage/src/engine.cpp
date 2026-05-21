@@ -328,6 +328,44 @@ int compare_json_for_order(const json& lhs, const json& rhs) {
     return 0;
 }
 
+std::string sql_like_pattern_to_regex(const std::string& pattern) {
+    std::string regex_pattern;
+    regex_pattern.reserve(pattern.size() * 2);
+
+    for (const char ch : pattern) {
+        switch (ch) {
+            case '%':
+                regex_pattern += ".*";
+                break;
+            case '_':
+                regex_pattern += '.';
+                break;
+            case '.':
+            case '^':
+            case '$':
+            case '|':
+            case '(':
+            case ')':
+            case '[':
+            case ']':
+            case '{':
+            case '}':
+            case '*':
+            case '+':
+            case '?':
+            case '\\':
+                regex_pattern += '\\';
+                regex_pattern += ch;
+                break;
+            default:
+                regex_pattern += ch;
+                break;
+        }
+    }
+
+    return regex_pattern;
+}
+
 void apply_group_by_rows(json& rows, const std::string& group_column) {
     if (group_column.empty() || !rows.is_array()) return;
 
@@ -395,36 +433,51 @@ void apply_order_by_rows(json& rows, const QueryPlan& plan) {
     });
 }
 
-// Применяет проекцию колонок к результатам SELECT
+std::string select_target_output_name(const SelectTarget& target) {
+    if (!target.alias.empty()) return target.alias;
+    if (target.aggregate != AggregateType::NONE) {
+        return query_aggregate_name(target.aggregate) + "(" + target.column_name + ")";
+    }
+    return target.column_name;
+}
+
+bool has_aggregate_targets(const QueryPlan& plan) {
+    return std::any_of(plan.select_targets.begin(), plan.select_targets.end(), [](const SelectTarget& target) {
+        return target.aggregate != AggregateType::NONE;
+    });
+}
+
+// Применяет проекцию колонок к результатам обычного SELECT
 void apply_column_projection(json& rows, const QueryPlan& plan) {
     if (!rows.is_array() || rows.empty()) return;
-    
+
+    if (has_aggregate_targets(plan)) return;
+
     // Проверяем, есть ли конкретные колонки в запросе (не *)
     bool select_all = false;
-    std::vector<std::string> columns_to_keep;
-    
+
     for (const auto& target : plan.select_targets) {
         if (target.column_name == "*") {
             select_all = true;
             break;
         }
-        std::string col_name = target.alias.empty() ? target.column_name : target.alias;
-        columns_to_keep.push_back(col_name);
     }
-    
-    if (select_all || columns_to_keep.empty()) {
+
+    if (select_all || plan.select_targets.empty()) {
         // Возвращаем все колонки
         return;
     }
-    
+
     // Применяем проекцию к каждой строке
     for (auto& row : rows) {
         if (!row.is_object()) continue;
-        
+
         json projected_row = json::object();
-        for (const auto& col_name : columns_to_keep) {
-            if (row.contains(col_name)) {
-                projected_row[col_name] = row[col_name];
+        for (const auto& target : plan.select_targets) {
+            const std::string& source_name = target.column_name;
+            const std::string output_name = select_target_output_name(target);
+            if (row.contains(source_name)) {
+                projected_row[output_name] = row[source_name];
             }
         }
         row = std::move(projected_row);
@@ -748,7 +801,7 @@ public:
                     const int v = val.get<int>();
                     const int lo = std::get<int>(node->right_value.data);
                     const int hi = std::get<int>(node->right_value_between->data);
-                    return v >= lo && v < hi;
+                    return v >= lo && v <= hi;
                 }
 
                 if (std::holds_alternative<std::string>(node->right_value.data)) {
@@ -756,7 +809,7 @@ public:
                     const auto& v = val.get_ref<const std::string&>();
                     const auto& lo = std::get<std::string>(node->right_value.data);
                     const auto& hi = std::get<std::string>(node->right_value_between->data);
-                    return v >= lo && v < hi;
+                    return v >= lo && v <= hi;
                 }
 
                 return false;
@@ -765,7 +818,9 @@ public:
             case OpType::LIKE: {
                 if (!val.is_string()) return false;
                 try {
-                    std::regex re(std::get<std::string>(node->right_value.data));
+                    const std::string pattern =
+                        sql_like_pattern_to_regex(std::get<std::string>(node->right_value.data));
+                    std::regex re(pattern);
                     return std::regex_match(val.get_ref<const std::string&>(), re);
                 } catch (...) {
                     return false;
@@ -1383,10 +1438,12 @@ void Engine::delete_records(const QueryPlan& plan) {
 
                 size_t data_off = off + sizeof(RecordHeader);
                 if (!rh->is_deleted) {
+                    const size_t payload_off = data_off;
                     auto row = RowDeserializer::deserialize(schema, buf.data(), data_off, string_pool.get());
 
                     if (ConditionEvaluator::evaluate(row, plan.where_clause.get())) {
-                        std::vector<char> old_payload(buf.begin() + data_off, buf.begin() + data_off + rh->record_size);
+                        std::vector<char> old_payload(
+                            buf.begin() + payload_off, buf.begin() + payload_off + rh->record_size);
 
                         for (size_t c = 0; c < h.column_count; ++c) {
                             if (!h.columns[c].is_indexed) continue;
@@ -1507,10 +1564,12 @@ void Engine::update_records(const QueryPlan& plan) {
 
                 size_t data_off = off + sizeof(RecordHeader);
                 if (!rh->is_deleted) {
+                    const size_t payload_off = data_off;
                     auto row = RowDeserializer::deserialize(schema, buf.data(), data_off, string_pool.get());
 
                     if (ConditionEvaluator::evaluate(row, plan.where_clause.get())) {
-                        std::vector<char> old_payload(buf.begin() + data_off, buf.begin() + data_off + rh->record_size);
+                        std::vector<char> old_payload(
+                            buf.begin() + payload_off, buf.begin() + payload_off + rh->record_size);
 
                         json updated_row = row;
                         for (size_t i = 0; i < plan.target_columns.size(); ++i) {
@@ -1562,7 +1621,7 @@ void Engine::update_records(const QueryPlan& plan) {
 
                         if (same_size) {
                             // in-place update
-                            std::memcpy(buf.data() + data_off, new_payload.data(), new_payload.size());
+                            std::memcpy(buf.data() + payload_off, new_payload.data(), new_payload.size());
 
                             for (size_t c = 0; c < h.column_count; ++c) {
                                 if (!h.columns[c].is_indexed) continue;
