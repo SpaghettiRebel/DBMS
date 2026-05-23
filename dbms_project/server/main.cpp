@@ -8,6 +8,7 @@
 
 namespace {
 
+// читает значение аргумента командной строки по имени опции.
 bool read_option(int argc, char* argv[], int& index, const std::string& name, std::string& out) {
     if (std::string(argv[index]) == name && index + 1 < argc) {
         out = argv[index + 1];
@@ -19,6 +20,7 @@ bool read_option(int argc, char* argv[], int& index, const std::string& name, st
 
 }
 
+// настраивает параметры сервера из аргументов и переменных окружения и запускает http-сервер.
 int main(int argc, char* argv[]) {
     std::string data_root = "./db_data";
     std::string host = "0.0.0.0";

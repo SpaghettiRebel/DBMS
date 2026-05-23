@@ -10,6 +10,7 @@
 
 namespace {
 
+// убирает пробелы в начале и конце копии строки.
 std::string trim_copy(const std::string& text) {
     size_t left = 0;
     while (left < text.size() && std::isspace(static_cast<unsigned char>(text[left]))) {
@@ -24,11 +25,13 @@ std::string trim_copy(const std::string& text) {
     return text.substr(left, right - left);
 }
 
+// проверяет, что команда не пустая и заканчивается точкой с запятой.
 bool command_complete(const std::string& buffer) {
     const std::string trimmed = trim_copy(buffer);
     return !trimmed.empty() && trimmed.back() == ';';
 }
 
+// отправляет sql-запрос на сервер и выводит ответ или ошибку.
 bool execute_query(httplib::Client& client, const std::string& query, const std::string& token) {
     nlohmann::json payload = {{"query", query}};
     httplib::Headers headers;
@@ -51,6 +54,7 @@ bool execute_query(httplib::Client& client, const std::string& query, const std:
     return false;
 }
 
+// разбивает текст скрипта на команды по точке с запятой с учетом строк.
 std::vector<std::string> split_script_commands(const std::string& script) {
     std::vector<std::string> commands;
     std::string buffer;
@@ -99,6 +103,7 @@ std::vector<std::string> split_script_commands(const std::string& script) {
 
 }
 
+// запускает клиент в режиме скрипта или интерактивном режиме и отправляет команды на сервер.
 int main(int argc, char* argv[]) {
     const char* host_env = std::getenv("DBMS_CLIENT_HOST");
     const char* port_env = std::getenv("DBMS_CLIENT_PORT");

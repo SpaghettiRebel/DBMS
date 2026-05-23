@@ -14,6 +14,7 @@ using json = nlohmann::json;
 
 namespace {
 
+// переводит число в шестнадцатеричную строку фиксированной длины.
 std::string to_hex(uint64_t value) {
     static constexpr char kHex[] = "0123456789abcdef";
     std::string out(16, '0');
@@ -24,6 +25,7 @@ std::string to_hex(uint64_t value) {
     return out;
 }
 
+// считает смешанный fnv1a-хэш для строки с заданным seed.
 uint64_t fnv1a_mix(std::string_view input, uint64_t seed) {
     uint64_t hash = 1469598103934665603ULL ^ seed;
     for (unsigned char byte : input) {
@@ -38,6 +40,7 @@ uint64_t fnv1a_mix(std::string_view input, uint64_t seed) {
     return hash;
 }
 
+// строит компактный хэш данных с учетом ключа.
 std::string compact_hash(std::string_view data, std::string_view key) {
     std::string seed_input;
     seed_input.reserve(key.size() + 1 + data.size());
@@ -60,6 +63,7 @@ std::string compact_hash(std::string_view data, std::string_view key) {
     return to_hex(h1) + to_hex(h2) + to_hex(h3) + to_hex(h4);
 }
 
+// кодирует строку в base64url без завершающих символов padding.
 std::string base64url_encode(std::string_view input) {
     static constexpr char kTable[] =
         "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/";
@@ -107,6 +111,7 @@ std::string base64url_encode(std::string_view input) {
     return output;
 }
 
+// декодирует строку из base64url в исходные байты.
 bool base64url_decode(std::string_view input, std::string& output) {
     static const std::array<int8_t, 256> kReverse = [] {
         std::array<int8_t, 256> table{};
@@ -163,16 +168,19 @@ bool base64url_decode(std::string_view input, std::string& output) {
     return true;
 }
 
+// создает подпись сообщения на основе секрета.
 std::string hmac_like_signature(std::string_view message, std::string_view secret) {
     return compact_hash(message, secret);
 }
 
+// формирует json-ответ для ошибки авторизации.
 std::string make_unauthorized_body(const std::string& reason) {
     json body = json::array();
     body.push_back({{"error", reason}});
     return body.dump();
 }
 
+// убирает пробелы в начале и конце строки.
 std::string trim(std::string input) {
     std::size_t left = 0;
     while (left < input.size() && std::isspace(static_cast<unsigned char>(input[left])) != 0) {
@@ -185,6 +193,7 @@ std::string trim(std::string input) {
     return input.substr(left, right - left);
 }
 
+// проверяет, что строка начинается с указанного префикса с учетом регистра.
 bool starts_with_case_sensitive(std::string_view value, std::string_view prefix) {
     if (value.size() < prefix.size()) {
         return false;
@@ -196,6 +205,7 @@ bool starts_with_case_sensitive(std::string_view value, std::string_view prefix)
 
 namespace dbms::auth {
 
+// генерирует случайную соль заданного размера.
 std::string generate_salt(std::size_t size) {
     std::random_device rd;
     std::mt19937_64 gen(rd());
@@ -209,14 +219,17 @@ std::string generate_salt(std::size_t size) {
     return base64url_encode(bytes);
 }
 
+// хэширует пароль с использованием соли.
 std::string hash_password(const std::string& password, const std::string& salt) {
     return compact_hash(password, salt);
 }
 
+// проверяет пароль по соли и ожидаемому хэшу.
 bool verify_password(const std::string& password, const std::string& salt, const std::string& expected_hash) {
     return hash_password(password, salt) == expected_hash;
 }
 
+// создает jwt-токен для пользователя на заданное время жизни.
 std::string generate_jwt(const std::string& subject, const std::string& secret, std::chrono::seconds ttl) {
     const auto now = std::chrono::system_clock::now();
     const auto iat = std::chrono::duration_cast<std::chrono::seconds>(now.time_since_epoch()).count();
@@ -236,6 +249,7 @@ std::string generate_jwt(const std::string& subject, const std::string& secret, 
     return signing_input + "." + signature;
 }
 
+// проверяет jwt-токен и при необходимости возвращает subject.
 bool validate_jwt(const std::string& token, const std::string& secret, std::string* subject) {
     const std::size_t first_dot = token.find('.');
     if (first_dot == std::string::npos) {
@@ -285,12 +299,14 @@ bool validate_jwt(const std::string& token, const std::string& secret, std::stri
     return true;
 }
 
+// задает секрет для проверки jwt-токенов.
 void JwtMiddleware::set_secret(std::string secret) {
     if (!secret.empty()) {
         secret_ = std::move(secret);
     }
 }
 
+// проверяет авторизацию перед обработкой защищенных query-запросов.
 void JwtMiddleware::before_handle(crow::request& req, crow::response& res, context&) {
     if (!starts_with_case_sensitive(req.url, "/query")) {
         return;
@@ -315,6 +331,7 @@ void JwtMiddleware::before_handle(crow::request& req, crow::response& res, conte
     }
 }
 
+// завершает обработку middleware после ответа.
 void JwtMiddleware::after_handle(crow::request&, crow::response&, context&) {}
 
 }
