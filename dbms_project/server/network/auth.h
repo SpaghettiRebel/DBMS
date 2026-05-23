@@ -8,11 +8,11 @@
 #undef DELETE
 #endif
 
-// --- ДОБАВЬ ЭТИ 3 СТРОКИ ---
+
 #ifdef DEBUG
 #undef DEBUG
 #endif
-// ---------------------------
+
 
 #if __has_include(<crow.h>)
 #include <crow.h>

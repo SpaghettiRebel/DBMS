@@ -3,18 +3,18 @@
 #include <vector>
 
 #include "QueryPlan.h"
-
+// список присваиваний (INSERT (вставка) или UPDATE (обновление))
 struct AssignmentList {
     std::vector<std::string> columns;
     std::vector<Value> values;
 };
-
+// заготовка для сортировки результатов
 struct OrderByClause {
     bool has_value = false;
     std::string column_name;
     bool descending = false;
 };
-
+// свойства, которые пользователь может задать для поля таблицы
 struct ColumnModifiers {
     bool is_not_null = false;
     bool is_indexed = false;
@@ -42,13 +42,13 @@ int yylex(void);
 void yyerror(const char* s);
 
 namespace {
-
+// безопасная строка
 std::string take_string(char* value) {
     std::string result = value != nullptr ? value : "";
     std::free(value);
     return result;
 }
-
+// функции упаковывают конкретные данные в универсальный объект Value
 Value make_int_value(int value) {
     Value result{};
     result.is_null = false;
@@ -82,7 +82,7 @@ Value make_null_value() {
     result.data = 0;
     return result;
 }
-
+// сравнение колонки со значением
 ConditionNode* make_condition(char* column_name, OpType op, Value* value) {
     auto* condition = new ConditionNode{};
     condition->is_leaf = true;
@@ -93,7 +93,7 @@ ConditionNode* make_condition(char* column_name, OpType op, Value* value) {
     delete value;
     return condition;
 }
-
+// сравнение двух колонок
 ConditionNode* make_column_comparison(char* left_column, OpType op, char* right_column) {
     auto* condition = new ConditionNode{};
     condition->is_leaf = true;
@@ -103,7 +103,7 @@ ConditionNode* make_column_comparison(char* left_column, OpType op, char* right_
     condition->is_right_column = true;
     return condition;
 }
-
+// для запросов вида WHERE id BETWEEN 10 AND 20
 ConditionNode* make_between_condition(char* column_name, Value* lower, Value* upper) {
     auto* condition = new ConditionNode{};
     condition->is_leaf = true;
@@ -115,7 +115,7 @@ ConditionNode* make_between_condition(char* column_name, Value* lower, Value* up
     delete upper;
     return condition;
 }
-
+// связывает два условия логическим оператором
 ConditionNode* make_logical_condition(ConditionNode* left, LogicalOpType op, ConditionNode* right) {
     auto* condition = new ConditionNode{};
     condition->is_leaf = false;
@@ -124,7 +124,7 @@ ConditionNode* make_logical_condition(ConditionNode* left, LogicalOpType op, Con
     condition->right_child.reset(right);
     return condition;
 }
-
+// используется, когда мы просто просим колонку
 SelectTarget make_select_target(char* column_name, char* alias) {
     SelectTarget target{};
     target.column_name = take_string(column_name);
@@ -134,7 +134,7 @@ SelectTarget make_select_target(char* column_name, char* alias) {
     }
     return target;
 }
-
+// упаковывает тип агрегата и имя колонки в структуру SelectTarget
 SelectTarget make_aggregate_target(AggregateType aggregate, char* column_name, char* alias) {
     SelectTarget target{};
     target.column_name = take_string(column_name);
@@ -144,7 +144,7 @@ SelectTarget make_aggregate_target(AggregateType aggregate, char* column_name, c
     }
     return target;
 }
-
+// склеивает имя таблицы и имя колонки через точку
 char* make_qualified_name(char* left, char* right) {
     const std::string qualified = take_string(left) + "." + take_string(right);
     return make_owned_c_string(qualified.c_str());
@@ -153,6 +153,7 @@ char* make_qualified_name(char* left, char* right) {
 }  // namespace
 %}
 
+/* типы данных которые переносят токены */
 %union {
     char* str;
     int int_value;
@@ -171,6 +172,7 @@ char* make_qualified_name(char* left, char* right) {
     ColumnModifiers* column_modifiers;
 }
 
+/* все ключевые слова, которые мы видели в лексере */
 %token SELECT SUM MIN MAX AVG COUNT GROUP BY ORDER ASC DESC
 %token USE FROM WHERE INSERT INTO VALUES CREATE TABLE DATABASE INT TEXT STRING
 %token DROP UPDATE SET DELETE REVERT AS BETWEEN LIKE AND OR NOT TOK_NULL INDEXED
@@ -205,6 +207,7 @@ char* make_qualified_name(char* left, char* right) {
 
 %%
 
+/* точка входа */
 input
     : statement ';'
     | statement
@@ -221,6 +224,7 @@ statement
     | revert_stmt
     ;
 
+/* СЕКЦИЯ ПРАВИЛ ГРАММАТИКИ заполняются поля для queryplan */
 use_stmt
     : USE ID
       {
@@ -705,6 +709,7 @@ column_modifiers
       }
     ;
 
+/* какие свойства можно дать колонке */
 column_def
     : ID column_type column_modifiers
       {
@@ -725,10 +730,11 @@ column_def
 
 %%
 
+// чтобы данные от старого запроса не перемешались с новым и не устроили кашу, эта функция полностью обнуляет глобальный план
 void reset_parsed_query_plan() {
     parsed_query_plan = QueryPlan{};
 }
-
+// если пользователь напишет запрос с ошибкой в синтаксисе, то ни одно грамматическое правило не подошло
 void yyerror(const char* s) {
     fprintf(stderr, "Parser error: %s\n", s);
 }

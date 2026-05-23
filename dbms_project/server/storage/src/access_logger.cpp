@@ -24,11 +24,13 @@ std::string LogEntry::to_string() const {
     
     int64_t duration_ms = end_time_ms - start_time_ms;
     
+    bool is_err = !(status_code == 0 || status_code == 200 || status_code == 202);
+
     // Формат: [TIMESTAMP] [CLIENT_ID] [REQUEST_ID] STATUS DURATION_MS "QUERY" [ERROR]
     oss << "[" << time_buf << "." << std::setfill('0') << std::setw(3) << start_ms << "] "
         << "[" << client_id << "] "
         << "[" << request_id << "] "
-        << (status_code == 0 ? "OK" : "ERR") << "(" << status_code << ") "
+        << (is_err ? "ERR" : "OK") << "(" << status_code << ") "
         << duration_ms << "ms \"";
     
     // Экранирование кавычек в запросе
@@ -42,7 +44,7 @@ std::string LogEntry::to_string() const {
     
     oss << "\"";
     
-    if (status_code != 0 && !error_msg.empty()) {
+    if (is_err && !error_msg.empty()) {
         oss << " ERROR: \"" << error_msg << "\"";
     }
     

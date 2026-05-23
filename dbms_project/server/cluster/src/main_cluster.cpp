@@ -1,3 +1,6 @@
+// считывает настройки (хост, порт), создает объект твоего Диспетчера (ClusterEntrypoint),
+// добавляет в него адреса серверов хранения через add_storage_node и запускает его метод start()
+
 #include "cluster_entrypoint.h"
 #include <iostream>
 #include <csignal>

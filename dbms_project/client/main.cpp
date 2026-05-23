@@ -1,4 +1,5 @@
 #include <cctype>
+#include <cstdlib>
 #include <fstream>
 #include <iostream>
 #include <string>
@@ -28,9 +29,13 @@ bool command_complete(const std::string& buffer) {
     return !trimmed.empty() && trimmed.back() == ';';
 }
 
-bool execute_query(httplib::Client& client, const std::string& query) {
+bool execute_query(httplib::Client& client, const std::string& query, const std::string& token) {
     nlohmann::json payload = {{"query", query}};
-    auto res = client.Post("/query", payload.dump(), "application/json");
+    httplib::Headers headers;
+    if (!token.empty()) {
+        headers.emplace("Authorization", "Bearer " + token);
+    }
+    auto res = client.Post("/query", headers, payload.dump(), "application/json");
 
     if (res && res->status == 200) {
         std::cout << res->body << std::endl;
@@ -95,7 +100,15 @@ std::vector<std::string> split_script_commands(const std::string& script) {
 }
 
 int main(int argc, char* argv[]) {
-    httplib::Client client("127.0.0.1", 18080);
+    const char* host_env = std::getenv("DBMS_CLIENT_HOST");
+    const char* port_env = std::getenv("DBMS_CLIENT_PORT");
+    const char* token_env = std::getenv("DBMS_TOKEN");
+
+    const std::string host = host_env != nullptr && *host_env != '\0' ? host_env : "127.0.0.1";
+    const int port = port_env != nullptr && *port_env != '\0' ? std::stoi(port_env) : 18080;
+    const std::string token = token_env != nullptr && *token_env != '\0' ? token_env : "";
+
+    httplib::Client client(host, port);
     std::string line;
     std::string command_buffer;
 
@@ -119,7 +132,7 @@ int main(int argc, char* argv[]) {
             const std::string trimmed = trim_copy(command);
             if (trimmed.empty()) continue;
             if (trimmed == "exit") break;
-            if (!execute_query(client, command)) {
+            if (!execute_query(client, command, token)) {
                 all_ok = false;
             }
         }
@@ -147,7 +160,7 @@ int main(int argc, char* argv[]) {
             continue;
         }
 
-        execute_query(client, command_buffer);
+        execute_query(client, command_buffer, token);
         command_buffer.clear();
     }
 

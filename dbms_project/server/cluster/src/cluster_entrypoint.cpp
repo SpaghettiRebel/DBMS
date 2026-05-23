@@ -91,7 +91,7 @@ ClusterEntrypoint::ClusterEntrypoint(const std::string& host, uint16_t port, int
 }
 
 ClusterEntrypoint::~ClusterEntrypoint() { stop(); }
-
+// поднятие TCP-сервера сокетов
 bool ClusterEntrypoint::start() {
     if (running_.load()) { log_error("Already running"); return false; }
 
@@ -197,13 +197,16 @@ QueryResult ClusterEntrypoint::execute_query(const std::string& query, const std
     try {
         std::string target;
         if (ShardManager::is_global_query(query)) {
+            // если запрос глобальный (CREATE DATABASE), берем первый попавшийся узел
             auto nodes = shard_manager_->get_all_nodes();
             if (nodes.empty()) throw std::runtime_error("No nodes");
             target = nodes[0];
         } else {
+            // если точечный, вытаскиваем имя таблицы регуляркой и ищем конкретный узел на кольце
             std::string tbl = ShardManager::extract_table_name(query);
             target = shard_manager_->get_node_for_key(tbl.empty() ? query : tbl);
         }
+        // отправляем готовый запрос на целевой storage_server по сети
         result.data = send_to_node(target, query).data;
         result.success = true;
         result.execution_time_ms = std::chrono::duration_cast<std::chrono::milliseconds>(std::chrono::steady_clock::now() - start).count();
@@ -264,7 +267,7 @@ void ClusterEntrypoint::accept_loop() {
         std::thread([this,cfd](){ handle_client(cfd); }).detach();
     }
 }
-
+// бинарный протокол общения
 void ClusterEntrypoint::handle_client(int cfd) {
     auto cleanup = [cfd](){ close_socket(cfd); };
     try {

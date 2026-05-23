@@ -8,7 +8,7 @@
 #ifdef DELETE
 #undef DELETE
 #endif
-
+// все sql команды которые поддерживает СУБД
 enum class QueryType {
     CREATE_DATABASE,
     DROP_DATABASE,
@@ -21,7 +21,7 @@ enum class QueryType {
     SELECT,
     REVERT
 };
-
+// типы данных, операторы сравнения, лигические связки, агрегаты
 enum class DataType { INT, STRING };
 
 enum class OpType { EQ, NEQ, LESS, GREATER, LEQ, GEQ, BETWEEN, LIKE };
@@ -36,12 +36,12 @@ enum class AggregateType {
     AVG,
     COUNT
 };
-
+// хранение данных
 struct Value {
     bool is_null = false;
     std::variant<int, std::string> data;
 };
-
+// хранит имя колонки, её тип и модификаторы
 struct ColumnDef {
     std::string name;
     DataType type;
@@ -51,13 +51,13 @@ struct ColumnDef {
     bool is_unique = false;
     bool is_autoincrement = false;
 };
-
+// описывает, что именно мы хотим достать в SELECT
 struct SelectTarget {
     std::string column_name;
     AggregateType aggregate = AggregateType::NONE;
     std::string alias;
 };
-
+// сложное сравнение WHERE id == 10 AND age > 18
 struct ConditionNode {
     bool is_leaf = true;
 
@@ -65,25 +65,25 @@ struct ConditionNode {
     OpType op;
     Value right_value;
     std::optional<Value> right_value_between;
-    std::string right_column;  // For column-to-column comparisons (empty if right_value is used)
-    bool is_right_column = false;  // true if comparing two columns, false if comparing column to literal
+    std::string right_column;
+    bool is_right_column = false;
 
     LogicalOpType logical_op = LogicalOpType::NONE;
     std::unique_ptr<ConditionNode> left_child;
     std::unique_ptr<ConditionNode> right_child;
 };
-
+// главная анкета
 struct QueryPlan {
     QueryType type;
     std::string database_name;
     std::string table_name;
 
     std::vector<ColumnDef> columns;
-
+    // данные для операций вставки и обновления (INSERT / UPDATE)
     std::vector<std::string> target_columns;
     std::vector<Value> values;
     std::vector<std::vector<Value>> value_rows;
-
+    // данные для операции выборки (SELECT)
     std::vector<SelectTarget> select_targets;
     std::string group_by_column;
     std::string order_by_column;

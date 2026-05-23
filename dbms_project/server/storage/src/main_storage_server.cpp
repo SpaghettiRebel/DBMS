@@ -1,5 +1,6 @@
 #include "engine.h"
 #include "storage_server.h"
+#include "access_logger.h"
 
 #include <iostream>
 #include <csignal>
@@ -65,7 +66,11 @@ int main(int argc, char* argv[]) {
         // Создание и запуск сервера
         StorageServer server(engine, host, port, max_connections);
         
+        // Инициализация AccessLogger (задание 7)
+        dbms::AccessLogger::instance().init("storage_access.log");
+
         if (!server.start()) {
+            dbms::AccessLogger::instance().shutdown();
             std::cerr << "Failed to start storage server" << std::endl;
             return 1;
         }
@@ -93,11 +98,13 @@ int main(int argc, char* argv[]) {
         // Graceful shutdown
         std::cout << "Initiating graceful shutdown..." << std::endl;
         server.stop(5000);
+        dbms::AccessLogger::instance().shutdown();
         
         std::cout << "Storage server stopped successfully" << std::endl;
         return 0;
 
     } catch (const std::exception& e) {
+        dbms::AccessLogger::instance().shutdown();
         std::cerr << "Fatal error: " << e.what() << std::endl;
         return 1;
     }

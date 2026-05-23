@@ -1,0 +1,58 @@
+{
+  "accounts": [
+    {
+      "groups": [],
+      "is_admin": true,
+      "password_hash": "3fcdfdadc82bb658ca29790fc2f3a3c8da964ff405c6dbc7c29724a97580cb2b",
+      "salt": "mMP3izcCov6cZUJ3jZLMWw",
+      "username": "admin"
+    },
+    {
+      "groups": [],
+      "is_admin": false,
+      "password_hash": "ec6609decb20bf14fa154bed91fe568d29f1e3d48ce05ff1a6c11a9c20f2c55f",
+      "salt": "ZkH5_p-SFyPpZwaD6jTmaw",
+      "username": "reader"
+    }
+  ],
+  "permissions": {
+    "advanced_11144": {
+      "default": {
+        "can_create_table": false,
+        "can_drop_database": false,
+        "can_drop_table": false,
+        "can_read": false,
+        "can_write": false
+      },
+      "groups": {},
+      "users": {
+        "reader": {
+          "can_create_table": false,
+          "can_drop_database": false,
+          "can_drop_table": false,
+          "can_read": true,
+          "can_write": false
+        }
+      }
+    },
+    "default": {
+      "default": {
+        "can_create_table": false,
+        "can_drop_database": false,
+        "can_drop_table": false,
+        "can_read": false,
+        "can_write": false
+      },
+      "groups": {},
+      "users": {
+        "reader": {
+          "can_create_table": false,
+          "can_drop_database": false,
+          "can_drop_table": false,
+          "can_read": true,
+          "can_write": false
+        }
+      }
+    }
+  }
+}

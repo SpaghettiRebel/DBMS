@@ -7,7 +7,7 @@
 #include <stdio.h>
 
 #include "grammar.tab.h"
-
+// выделяет память и копирует туда текст токена чтобы парсер мог прочитать и сохранить в queryplan
 static char* copy_text(const char* text) {
     const std::size_t length = std::strlen(text);
     char* copy = static_cast<char*>(std::malloc(length + 1));
@@ -17,7 +17,7 @@ static char* copy_text(const char* text) {
     std::memcpy(copy, text, length + 1);
     return copy;
 }
-
+// когда пользователь пишет строку в кавычках эта функция убирает сами кавычки по бокам и обрабатывает экранирование символов
 static char* copy_sql_string_literal(const char* text) {
     const std::string input(text);
     std::string output;
@@ -32,7 +32,6 @@ static char* copy_sql_string_literal(const char* text) {
     return copy_text(output.c_str());
 }
 %}
-
 WS              [ \t\r\n]+
 DIGIT           [0-9]
 ID_START        [A-Za-z_]
@@ -141,7 +140,6 @@ KW_STRING       [Ss][Tt][Rr][Ii][Nn][Gg]
 "="             { return '='; }
 ">"             { return '>'; }
 "<"             { return '<'; }
-
 {INT_LITERAL_RE}      {
                           yylval.int_value = std::atoi(yytext);
                           return INT_LITERAL;

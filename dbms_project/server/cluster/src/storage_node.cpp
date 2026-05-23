@@ -1,3 +1,4 @@
+// представляет собой один конкретный узел хранения. Внутри ClusterEntrypoint хранится массив таких нод.
 #include "storage_node.h"
 #include <cstring>
 #include <chrono>

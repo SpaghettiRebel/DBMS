@@ -57,11 +57,22 @@ target_include_directories(dbms_storage_core
         ${THIRD_PARTY_DIR}
 )
 
+# Исходники кластерного модуля (без main_cluster.cpp)
+set(CLUSTER_MODULE_SOURCES
+        cluster/src/storage_node.cpp
+        cluster/src/shard_manager.cpp
+        cluster/src/heartbeat_monitor.cpp
+        cluster/src/async_request_queue.cpp
+        cluster/src/telemetry_collector.cpp
+)
+
 # Основной исполняемый файл сервера
 add_executable(dbms_http_server
         main.cpp
         network/http_server.cpp
         network/auth.cpp
+        network/account_store.cpp
+        ${CLUSTER_MODULE_SOURCES}
         ${BISON_DbmsSqlParser_OUTPUTS}
         ${FLEX_DbmsSqlLexer_OUTPUTS}
 )
@@ -72,6 +83,7 @@ target_include_directories(dbms_http_server
         ${CMAKE_CURRENT_SOURCE_DIR}
         ${CMAKE_CURRENT_SOURCE_DIR}/network
         ${CMAKE_CURRENT_SOURCE_DIR}/storage/include
+        ${CMAKE_CURRENT_SOURCE_DIR}/cluster/include
         ${DBMS_ROOT_DIR}/shared
         ${THIRD_PARTY_DIR}/crow
         ${THIRD_PARTY_DIR}/boost
