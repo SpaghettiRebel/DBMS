@@ -80,7 +80,7 @@
    exit
 
 5. Во втором окне PowerShell проверьте статистику распределения по шардам:
-   Invoke-RestMethod -Uri http://127.0.0.1:18080/cluster/nodes -Headers @{Authorization="Bearer $env:DBMS_TOKEN"} | Format-List
+   Invoke-RestMethod -Uri "http://127.0.0.1:18080/cluster/nodes" -Headers @{Authorization="Bearer $($login.token)"} | Format-List
    *(Вы увидите, что на shard_0 ушло, например, 7 запросов, а на shard_1 - 9. Это доказывает работу шардирования)*.
 
 ==============================================
